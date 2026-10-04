@@ -23,6 +23,7 @@ export interface PrepareDownloadParams<T extends Downloadable> {
   destFilePath: string;
   setReferer?: boolean;
   signal: AbortSignal;
+  byteRange?: { offset: number; length: number };
 }
 
 export interface StartDownloadOverrides {
@@ -79,6 +80,7 @@ export default class Fetcher {
   }, rt = 0): Promise<FetcherGetResultOf<T>> {
 
     const { url, type, payload, maxRetries, signal } = args;
+    signal?.throwIfAborted();
 
     const urlObj = new URL(url);
     if (payload) {
@@ -182,9 +184,19 @@ export default class Fetcher {
   }
 
   async prepareDownload<T extends Downloadable>(params: PrepareDownloadParams<T>) {
-    const { url, srcEntity, destFilePath, setReferer = false, signal } = params;
+    const { url, srcEntity, destFilePath, setReferer = false, signal, byteRange } = params;
+    signal.throwIfAborted();
     const request = new Request(url, { method: 'GET' });
     this.#setHeaders(request, 'html', { setCookie: false, setHost: false, setReferer });
+    if (byteRange) {
+      const { offset, length } = byteRange;
+      if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(length) || length <= 0 ||
+        !Number.isSafeInteger(offset + length)) {
+        throw new FetcherError('Invalid byte range', url, request.method);
+      }
+      request.headers.set('Range', `bytes=${offset}-${offset + length - 1}`);
+      request.headers.set('Accept-Encoding', 'identity');
+    }
     const internalAbortController = new AbortController();
     let removeAbortHandler: undefined | (() => void) = undefined;
     if (signal) {
@@ -204,6 +216,15 @@ export default class Fetcher {
       }
 
       if (this.#assertResponseOK(res, url, request.method)) {
+        if (byteRange) {
+          const range = res.headers.get('content-range')?.match(/^bytes (\d+)-(\d+)\/(?:\d+|\*)$/);
+          const encoding = res.headers.get('content-encoding');
+          if (res.status !== 206 || !range || Number(range[1]) !== byteRange.offset ||
+            Number(range[2]) !== byteRange.offset + byteRange.length - 1 || (encoding && encoding !== 'identity')) {
+            await res.body.cancel();
+            throw new FetcherError('Server did not return the requested byte range', url, request.method);
+          }
+        }
         const destFilename = path.parse(destFilePath).base;
         const progress = new Progress(res, {
           reportInterval: 300
@@ -214,7 +235,7 @@ export default class Fetcher {
         const start = (overrides?: StartDownloadOverrides) => {
           const _destFilePath = overrides?.destFilePath || destFilePath;
           const _tmpFilePath = overrides?.tmpFilePath || FSHelper.createTmpFilePath(_destFilePath, srcEntity.id);
-          return this.#startDownload(_res, _tmpFilePath, _destFilePath, progress, removeAbortHandler)
+          return this.#startDownload(_res, _tmpFilePath, _destFilePath, progress, removeAbortHandler, byteRange?.length)
         };
         const abort = () => {
           if (removeAbortHandler) removeAbortHandler();
@@ -241,7 +262,8 @@ export default class Fetcher {
     tmpFilePath: string,
     destFilePath: string,
     progress: Progress,
-    cleanup?: () => void) {
+    cleanup?: () => void,
+    expectedSize?: number) {
 
     try {
       let size = 0;
@@ -263,6 +285,9 @@ export default class Fetcher {
           fs.createWriteStream(tmpFilePath)
         );
         size = fs.lstatSync(tmpFilePath).size;
+        if (expectedSize !== undefined && size !== expectedSize) {
+          throw new FetcherError('Byte-range response has an unexpected size', response.url, 'GET');
+        }
       }
 
       const commit = () => {

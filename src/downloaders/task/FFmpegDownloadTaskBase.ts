@@ -102,29 +102,35 @@ export default abstract class FFmpegDownloadTaskBase<T extends Downloadable> ext
             }
           }
         };
+        const finishAbort = () => {
+          __cleanup();
+          this.#abortingCallback?.();
+          resolve();
+        };
   
         try {
-          this.#abortController = new AbortController();
-          this.#abortController.signal.onabort = () => {
+          const abortController = this.#abortController = new AbortController();
+          abortController.signal.onabort = () => {
             if (this.#ffmpegCommand) {
               this.#ffmpegCommand.kill('SIGKILL');
             }
-            else if (this.#abortingCallback) {
-              this.#abortingCallback();
-              __cleanup();
-              resolve();
-            }
+            // Input preparation must settle its workers before temporary files are removed.
           };
   
           let ffmpegCommandParams;
           try {
-            ffmpegCommandParams = await this.getFFmpegCommandParams(this.#abortController.signal);
+            ffmpegCommandParams = await this.getFFmpegCommandParams(abortController.signal);
           }
           catch (error) {
-            if (this.#abortController.signal.aborted) {
+            if (abortController.signal.aborted) {
+              finishAbort();
               return;
             }
             throw error;
+          }
+          if (this.hasEnded()) {
+            resolve();
+            return;
           }
   
           const destFilePath = ffmpegCommandParams.output;
@@ -153,21 +159,24 @@ export default abstract class FFmpegDownloadTaskBase<T extends Downloadable> ext
           let hasError = false;
 
           let preparedFFmpegCommandParams: PreparedFFmpegCommandParams;
+          this.notifyStart();
           try {
             preparedFFmpegCommandParams = await this.prepareFFmpegCommandParams(ffmpegCommandParams, {
               destFilePath: _destFilePath,
               tmpFilePath: _tmpFilePath,
-              signal: this.#abortController.signal
+              signal: abortController.signal
             });
             cleanupPreparedInput = preparedFFmpegCommandParams.cleanup || null;
           }
           catch (error) {
-            if (this.#abortController.signal.aborted) {
+            if (abortController.signal.aborted) {
+              finishAbort();
               return;
             }
             throw error;
           }
-          if (this.#abortController.signal.aborted) {
+          if (abortController.signal.aborted) {
+            finishAbort();
             return;
           }
   
@@ -175,7 +184,6 @@ export default abstract class FFmpegDownloadTaskBase<T extends Downloadable> ext
 
           this.#ffmpegCommand.on('start', (commandLine: string) => {
             this.#commandLine = commandLine;
-            this.notifyStart();
           });
   
           this.#ffmpegCommand.on('progress', (progress: FFmpegProgress) => {
