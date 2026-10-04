@@ -1,0 +1,256 @@
+import path from 'path';
+import type Logger from '../utils/logging/Logger.js';
+import { type DeepRequired, pickDefined } from '../utils/Misc.js';
+import type DateTime from '../utils/DateTime.js';
+
+const DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0';
+
+
+export type FileExistsAction = 'overwrite' | 'skip' | 'saveAsCopy' | 'saveAsCopyIfNewer';
+export type StopOnCondition =
+  'never'
+  | 'previouslyDownloaded'
+  | 'publishDateOutOfRange'
+  /**
+   * @deprecated
+   */
+  | 'postPreviouslyDownloaded'
+  /**
+   * @deprecated
+   */
+  | 'postPublishDateOutOfRange';
+
+export interface DownloaderIncludeOptions {
+  lockedContent?: boolean;
+  postsWithMediaType?: Array<'image' | 'video' | 'audio' | 'attachment' | 'podcast'> | 'any' | 'none';
+  postsInTier?: Array<string> | 'any';
+  postsPublished?: {
+    after?: DateTime | null;
+    before?: DateTime | null;
+  }
+  productsPublished?: {
+    after?: DateTime | null;
+    before?: DateTime | null;
+  };
+  campaignInfo?: boolean;
+  contentInfo?: boolean;
+  previewMedia?: boolean | Array<'image' | 'video' | 'audio'>;
+  contentMedia?: boolean | Array<'image' | 'video' | 'audio' | 'attachment' | 'file'>;
+  protectedMedia?: boolean;
+  allMediaVariants?: boolean;
+  mediaThumbnails?: boolean;
+  mediaByFilename?: {
+    images?: string | null;
+    audio?: string | null;
+    attachments?: string | null;
+  };
+  comments?: boolean;
+}
+
+export interface ProxyOptions {
+  url: string;
+  rejectUnauthorizedTLS?: boolean;
+}
+
+export interface EmbedDownloader {
+  provider: string;
+  exec: string;
+}
+
+export interface DownloaderOptions {
+  cookie?: string;
+  useStatusCache?: boolean;
+  stopOn?: StopOnCondition;
+  pathToFFmpeg?: string | null;
+  pathToYouTubeCredentials?: string | null;
+  pathToDeno?: string | null;
+  outDir?: string;
+  dirNameFormat?: {
+    campaign?: string;
+    content?: string;
+  };
+  filenameFormat?: {
+    media?: string;
+  }
+  include?: DownloaderIncludeOptions;
+  request?: {
+    maxRetries?: number;
+    maxConcurrent?: number;
+    minTime?: number;
+    proxy?: ProxyOptions | null;
+    userAgent?: string;
+  };
+  fileExistsAction?: {
+    content?: FileExistsAction;
+    info?: FileExistsAction;
+    infoAPI?: FileExistsAction;
+  };
+  embedDownloaders?: EmbedDownloader[];
+  maxVideoResolution?: number | null;
+  logger?: Logger | null;
+  dryRun?: boolean;
+}
+
+export type DownloaderInit = DeepRequired<Pick<DownloaderOptions,
+  'outDir' |
+  'useStatusCache' |
+  'stopOn' |
+  'pathToFFmpeg' |
+  'pathToYouTubeCredentials' |
+  'pathToDeno' |
+  'dirNameFormat' |
+  'filenameFormat' |
+  'include' |
+  'request' |
+  'fileExistsAction' |
+  'embedDownloaders' |
+  'dryRun'>> & {
+    cookie?: string;
+    maxVideoResolution?: number | null;
+  };
+
+const DEFAULT_DOWNLOADER_INIT: DownloaderInit = {
+  outDir: process.cwd(),
+  useStatusCache: true,
+  stopOn: 'never',
+  pathToFFmpeg: null,
+  pathToYouTubeCredentials: null,
+  pathToDeno: null,
+  dirNameFormat: {
+    campaign: '{creator.vanity}[ - ]?{campaign.name}',
+    content: '{content.id}[ - ]?{content.name}'
+  },
+  filenameFormat: {
+    media: '{media.filename}'
+  },
+  include: {
+    lockedContent: true,
+    postsWithMediaType: 'any',
+    postsInTier: 'any',
+    postsPublished: {
+      after: null,
+      before: null
+    },
+    productsPublished: {
+      after: null,
+      before: null
+    },
+    campaignInfo: true,
+    contentInfo: true,
+    previewMedia: true,
+    protectedMedia: false,
+    contentMedia: true,
+    allMediaVariants: false,
+    mediaThumbnails: true,
+    mediaByFilename: {
+      images: null,
+      audio: null,
+      attachments: null
+    },
+    comments: false
+  },
+  request: {
+    maxRetries: 3,
+    maxConcurrent: 10,
+    minTime: 333,
+    proxy: {
+      url: '',
+      rejectUnauthorizedTLS: true
+    },
+    userAgent: DEFAULT_USER_AGENT
+  },
+  fileExistsAction: {
+    content: 'skip',
+    info: 'saveAsCopyIfNewer',
+    infoAPI: 'overwrite'
+  },
+  embedDownloaders: [],
+  maxVideoResolution: null,
+  dryRun: false
+};
+
+export function getDownloaderInit(options?: DownloaderOptions): DownloaderInit {
+  const defaults = DEFAULT_DOWNLOADER_INIT;
+
+  let proxy: DownloaderInit['request']['proxy'] = null;
+  if (options?.request?.proxy && defaults.request.proxy) {
+    proxy = {
+      url: options.request.proxy.url,
+      rejectUnauthorizedTLS: pickDefined(options.request.proxy.rejectUnauthorizedTLS, defaults.request.proxy.rejectUnauthorizedTLS)
+    };
+  }
+  if (!proxy?.url) {
+    proxy = null;
+  }
+
+  return {
+    cookie: options?.cookie,
+    outDir: options?.outDir ? path.resolve(options.outDir) : defaults.outDir,
+    useStatusCache: pickDefined(options?.useStatusCache, defaults.useStatusCache),
+    stopOn: pickDefined(options?.stopOn, defaults.stopOn),
+    pathToFFmpeg: pickDefined(options?.pathToFFmpeg, defaults.pathToFFmpeg),
+    pathToYouTubeCredentials: pickDefined(options?.pathToYouTubeCredentials, defaults.pathToYouTubeCredentials),
+    pathToDeno: pickDefined(options?.pathToDeno, defaults.pathToDeno),
+    dirNameFormat: {
+      campaign: options?.dirNameFormat?.campaign || defaults.dirNameFormat.campaign,
+      content: options?.dirNameFormat?.content || defaults.dirNameFormat.content
+    },
+    filenameFormat: {
+      media: options?.filenameFormat?.media || defaults.filenameFormat.media
+    },
+    include: {
+      lockedContent: pickDefined(options?.include?.lockedContent, defaults.include.lockedContent),
+      postsWithMediaType: pickDefined(options?.include?.postsWithMediaType, defaults.include.postsWithMediaType),
+      postsInTier: pickDefined(options?.include?.postsInTier, defaults.include.postsInTier),
+      postsPublished: {
+        after: pickDefined(options?.include?.postsPublished?.after, defaults.include.postsPublished.after),
+        before: pickDefined(options?.include?.postsPublished?.before, defaults.include.postsPublished.before)
+      },
+      productsPublished: {
+        after: pickDefined(options?.include?.productsPublished?.after, defaults.include.productsPublished.after),
+        before: pickDefined(options?.include?.productsPublished?.before, defaults.include.productsPublished.before)
+      },
+      campaignInfo: pickDefined(options?.include?.campaignInfo, defaults.include.campaignInfo),
+      contentInfo: pickDefined(options?.include?.contentInfo, defaults.include.contentInfo),
+      previewMedia: pickDefined(options?.include?.previewMedia, defaults.include.previewMedia),
+      protectedMedia: pickDefined(options?.include?.protectedMedia, defaults.include.protectedMedia),
+      contentMedia: pickDefined(options?.include?.contentMedia, defaults.include.contentMedia),
+      allMediaVariants: pickDefined(options?.include?.allMediaVariants, defaults.include.allMediaVariants),
+      mediaThumbnails: pickDefined(options?.include?.mediaThumbnails, defaults.include.mediaThumbnails),
+      mediaByFilename: {
+        images: pickDefined(options?.include?.mediaByFilename?.images, defaults.include.mediaByFilename.images),
+        audio: pickDefined(options?.include?.mediaByFilename?.audio, defaults.include.mediaByFilename.audio),
+        attachments: pickDefined(options?.include?.mediaByFilename?.attachments, defaults.include.mediaByFilename.attachments)
+      },
+      comments: pickDefined(options?.include?.comments, defaults.include.comments)
+    },
+    request: {
+      maxRetries: pickDefined(options?.request?.maxRetries, defaults.request.maxRetries),
+      maxConcurrent: pickDefined(options?.request?.maxConcurrent, defaults.request.maxConcurrent),
+      minTime: pickDefined(options?.request?.minTime, defaults.request.minTime),
+      proxy,
+      userAgent: pickDefined(options?.request?.userAgent, defaults.request.userAgent)
+    },
+    fileExistsAction: {
+      content: options?.fileExistsAction?.content || defaults.fileExistsAction.content,
+      info: options?.fileExistsAction?.info || defaults.fileExistsAction.info,
+      infoAPI: options?.fileExistsAction?.infoAPI || defaults.fileExistsAction.infoAPI
+    },
+    embedDownloaders: pickDefined(options?.embedDownloaders, defaults.embedDownloaders),
+    maxVideoResolution: pickDefined(options?.maxVideoResolution, defaults.maxVideoResolution),
+    dryRun: pickDefined(options?.dryRun, defaults.dryRun)
+  };
+}
+
+export function getDefaultDownloaderOutDir() {
+  return DEFAULT_DOWNLOADER_INIT.outDir;
+}
+
+export function getDefaultDownloaderOptions(): DeepRequired<DownloaderOptions> {
+  return {
+    ...getDownloaderInit(),
+    cookie: '',
+    maxVideoResolution: null,
+    logger: null
+  };
+}

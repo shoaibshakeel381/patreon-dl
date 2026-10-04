@@ -1,0 +1,527 @@
+import { stripHtml } from 'string-strip-html';
+import { type Campaign } from '../entities/Campaign.js';
+import { isYouTubeEmbed, type Downloadable } from '../entities/Downloadable.js';
+import { type AttachmentMediaItem, type AudioMediaItem, type DefaultImageMediaItem, type MediaItem, type PostCoverImageMediaItem, type PostThumbnailMediaItem, type VideoMediaItem } from '../entities/MediaItem.js';
+import { type LinkedAttachment, PostType, type Post, type PostList as PostList, type PostEmbed, type Collection, type PostTag } from '../entities/Post.js';
+import { type Tier } from '../entities/Reward.js';
+import { pickDefined } from '../utils/Misc.js';
+import ObjectHelper from '../utils/ObjectHelper.js';
+import Parser from './Parser.js';
+import URLHelper from '../utils/URLHelper.js';
+import type Logger from '../utils/logging/Logger.js';
+import type Fetcher from '../utils/Fetcher.js';
+
+export default class PostParser extends Parser {
+
+  protected name = 'PostParser';
+
+  #fetcher: Fetcher;
+
+  constructor(fetcher: Fetcher, logger?: Logger | null) {
+    super(logger);
+    this.#fetcher = fetcher;
+  }
+
+  async parsePostsAPIResponse(json: any, src: string): Promise<PostList> {
+
+    this.log('debug', `Parse API data obtained from "${src}"`);
+
+    /*If (json.errors) {
+      this.log('error', `API response error:`, json.errors);
+      return null;
+    }*/
+
+    const includedJSON = json.included;
+    const dataJSON = json.data;
+    let postsJSONArray: any[];
+    // Check if API data consists of just a single post (not an array).
+    // If so, place the post data in an array.
+    if (dataJSON && !Array.isArray(dataJSON) && dataJSON.type === 'post') {
+      postsJSONArray = [ dataJSON ];
+    }
+    // If API data is an array, filter out those matching 'post' type.
+    else if (dataJSON && Array.isArray(dataJSON)) {
+      postsJSONArray = dataJSON.filter((data) => data.type === 'post');
+    }
+    else {
+      // No posts found
+      postsJSONArray = [];
+    }
+    const collection: PostList = {
+      items: [],
+      total: ObjectHelper.getProperty(json, 'meta.pagination.total') || null,
+      // src could be a file, in which case there'll be no nextURL.
+      nextURL: URLHelper.validateURL(src) ? this.parseCollectionNextURL(json, src) : null
+    };
+
+    let hasIncludedJSON = true;
+    if (!includedJSON || !Array.isArray(includedJSON)) {
+      this.log('warn', `'included' field missing in API data obtained from "${src}" or has incorrect type - no media items and campaign info will be returned`);
+      hasIncludedJSON = false;
+    }
+
+    if (postsJSONArray.length === 0) {
+      this.log('warn', `No posts found in API data obtained from "${src}"`);
+      return collection;
+    }
+    if (postsJSONArray.length > 1) {
+      this.log('debug', `${postsJSONArray.length} posts found - iterate and parse`);
+    }
+    else {
+      this.log('debug', '1 post found - parse');
+    }
+
+    let campaign: Campaign | null | undefined;
+
+    for (const postJSON of postsJSONArray) {
+      if (!postJSON || typeof postJSON !== 'object') {
+        this.log('error', 'Parse error: API data of post has incorrect type');
+        continue;
+      }
+
+      const { id, attributes, relationships = {} } = postJSON;
+
+      if (!id) {
+        this.log('error', 'Parse error: \'id\' field missing in API data of post');
+        continue;
+      }
+
+      this.log('debug', `Parse post #${id}`);
+
+      if (!attributes || typeof attributes !== 'object') {
+        this.log('error', `Parse error: 'attributes' field missing in API data of post #${id} or has incorrect type`);
+        continue;
+      }
+
+      // Campaign info
+      if (campaign === undefined) {
+        const campaignId = ObjectHelper.getProperty(postJSON, 'relationships.campaign.data.id') || null;
+        if (!campaignId || typeof campaignId !== 'string') {
+          this.log('warn', `Campaign ID missing in API data of post #${id} or has incorrect type` +
+            ' - no campaign info will be available until campaign ID is obtained');
+        }
+        else if (hasIncludedJSON) {
+          campaign = this.findInAPIResponseIncludedArray(includedJSON, campaignId, 'campaign');
+        }
+      }
+
+      // Viewability
+      const isViewable = pickDefined(attributes.current_user_can_view, true);
+      if (attributes.current_user_can_view === undefined) {
+        this.log('warn', `'current_user_can_view' attribute missing in API data of post #${id} - assuming post is viewable`);
+      }
+
+      // Get downloadables from relationships
+      let audio: Downloadable<AudioMediaItem> | null = null;
+      let audioPreview: Downloadable<AudioMediaItem> | null = null;
+      let images: Downloadable<DefaultImageMediaItem>[] = [];
+      let attachments: Downloadable<AttachmentMediaItem>[] = [];
+      if (hasIncludedJSON) {
+        const downloadables = this.fetchDownloadablesFromRelationships(
+          relationships,
+          {
+            'audio': 'audio items',
+            'audio_preview': 'audio preview items',
+            'images': 'images',
+            'attachments_media': 'attachments'
+          },
+          includedJSON,
+          `post #${id}`,
+          false
+        );
+        audio = downloadables.audio?.[0] as Downloadable<AudioMediaItem> || null;
+        audioPreview = downloadables.audio_preview?.[0] as Downloadable<AudioMediaItem> || null;
+        images = downloadables.images as Downloadable<DefaultImageMediaItem>[] || [];
+        attachments = downloadables.attachments_media as Downloadable<AttachmentMediaItem>[] || [];
+      }
+
+      // If post metadata has image_order, use that to arrange images
+      const imageOrder = ObjectHelper.getProperty(attributes, 'post_metadata.image_order');
+      if (Array.isArray(imageOrder) && images.length > 0) {
+        const orderedImages: DefaultImageMediaItem[] = [];
+        for (const imageId of imageOrder) {
+          const imgIndex = images.findIndex((i) => i.id === imageId);
+          if (imgIndex !== -1) {
+            orderedImages.push(images[imgIndex]);
+            images.splice(imgIndex, 1);
+          }
+          else {
+            this.log('warn', `Image with ID "${imageId}" listed in 'image_order' metadata of post #${id} not found among images obtained from relationships - skipping`);
+          }
+        }
+        if (images.length > 0) {
+          this.log('warn', `${images.length} images obtained from relationships of post #${id} not listed in 'image_order' metadata - appending at the end`);
+          orderedImages.push(...images);
+        }
+        images = orderedImages.map((img, index) => ({ ...img, index }));
+      }
+      else if (images.length > 0) {
+        images.forEach((img, index) => {
+          img.index = index;
+        });
+      }
+
+      // Post content and teaser
+      const content = this.#parseContent(attributes);
+      const teaserText = this.#parseContent({
+        content: attributes.teaser_text,
+        content_json_string: attributes.teaser_text_json_string
+      });
+
+      // Get inline media from content (currently only images and linked attachments supported)
+      const linkedAttachments: LinkedAttachment[] = [];
+      const inlineMediaBody = content || teaserText;
+      if (hasIncludedJSON && inlineMediaBody) {
+        const inlineMedia = this.parseInlineMedia(id, inlineMediaBody, includedJSON);
+        inlineMedia.images.forEach((img, index) => {
+          img.index = images.length + index;
+        });
+        images.push(...inlineMedia.images);
+        linkedAttachments.push(...inlineMedia.linkedAttachments);
+      }
+
+      // Video preview
+      let videoPreview: Downloadable<VideoMediaItem> | null = null;
+      const vidPreviewJSON = attributes.video_preview;
+      if (vidPreviewJSON && typeof vidPreviewJSON === 'object') {
+        videoPreview = this.#getVideoMediaItemFromAttr(vidPreviewJSON, includedJSON, id);
+        if (!videoPreview.downloadURL && !videoPreview.displayURL) {
+          this.log('warn', `Video preview for post #${id} is missing URLs`);
+        }
+      }
+
+      // Video - `postType` is 'video_external_file' and has `postFile`
+      let video: Downloadable<VideoMediaItem> | null = null;
+      const postFileJSON = attributes.post_file;
+      const hasPostFile = postFileJSON && typeof postFileJSON === 'object';
+      if (attributes.post_type === PostType.Video && hasPostFile) {
+        video = this.#getVideoMediaItemFromAttr(postFileJSON, includedJSON, id);
+        if (!video.downloadURL && !video.displayURL) {
+          this.log('warn', `Video for post #${id} is missing URLs`);
+        }
+      }
+      // Repeat for 'podcast' type - but note that `postFile` here can be audio or video.
+      // We are only interested in video. For audio, info should have already been obtained
+      // through relationships above.
+      if (attributes.post_type === PostType.Podcast && hasPostFile) {
+        video = this.#getVideoMediaItemFromAttr(postFileJSON, includedJSON, id, true);
+      }
+
+      if (attributes.post_type === PostType.Podcast && isViewable && !video && !audio) {
+        this.log('warn', `Post #${id} is podcast type and is viewable, but no video or audio was found`);
+      }
+
+      // Cover image
+      let coverImage: PostCoverImageMediaItem | null = null;
+      if (attributes.image) {
+        coverImage = {
+          type: 'image',
+          id: `post:${id}:cover`,
+          filename: isViewable ? 'cover-image' : 'cover-image-preview',
+          mimeType: null,
+          imageType: 'postCoverImage',
+          imageURLs: {
+            large: ObjectHelper.getProperty(attributes, 'image.large_url') || null,
+            thumbSquareLarge: ObjectHelper.getProperty(attributes, 'image.thumb_square_large_url') || null,
+            thumbSquare: ObjectHelper.getProperty(attributes, 'image.thumb_square_url') || null,
+            thumb: ObjectHelper.getProperty(attributes, 'image.thumb_url') || null,
+            default: ObjectHelper.getProperty(attributes, 'image.url') || null
+          }
+        };
+      }
+
+      // Thumbnail
+      let thumbnail: PostThumbnailMediaItem | null = null;
+      if (attributes.thumbnail) {
+        thumbnail = {
+          type: 'image',
+          id: `post:${id}:thumbnail`,
+          filename: isViewable ? 'thumbnail' : 'thumbnail-preview',
+          mimeType: null,
+          imageType: 'postThumbnail',
+          imageURLs: {
+            large: ObjectHelper.getProperty(attributes, 'thumbnail.large') || null,
+            large2: ObjectHelper.getProperty(attributes, 'thumbnail.large_2') || null,
+            square: ObjectHelper.getProperty(attributes, 'thumbnail.square') || null,
+            default: ObjectHelper.getProperty(attributes, 'thumbnail.url') || null
+          }
+        };
+      }
+
+      // Audio items doesn't have thumbnail - use first image or thumbnail
+      if (audio) {
+        audio.thumbnailURL =
+          images[0]?.imageURLs.default ||
+          thumbnail?.imageURLs.default || null;
+      }
+      if (audioPreview) {
+        audioPreview.thumbnailURL =
+          images[0]?.imageURLs.default ||
+          thumbnail?.imageURLs.default || null;
+      }
+
+      // Embed
+      const embedJSON = attributes.embed;
+      let embed: PostEmbed | null = null;
+      if (embedJSON && typeof embedJSON === 'object') {
+        let embedType: PostEmbed['type'];
+        switch (attributes.post_type) {
+          case 'video_embed':
+            embedType = 'videoEmbed';
+            break;
+          case 'link':
+            embedType = 'linkEmbed';
+            break;
+          default:
+            embedType = 'unknownEmbed';
+        }
+        embed = {
+          id: `${id}-embed`,
+          postId: id,
+          postURL: attributes.url || null,
+          type: embedType,
+          description: embedJSON.descripton || null,
+          html: embedJSON.html || null,
+          provider: embedJSON.provider || null,
+          providerURL: embedJSON.provider_url || null,
+          subject: embedJSON.subject || null,
+          url: embedJSON.url || null,
+          thumbnailURL: ObjectHelper.getProperty(attributes, 'image.large_url') || null // Use cover image
+        };
+      }
+      // YouTube embeds can have 0-byte thumbnail:
+      // https://github.com/patrickkfkan/patreon-dl/issues/120
+      if (embed && isYouTubeEmbed(embed) && embed.url) {
+        // Credit: @Fabelwesen (https://github.com/Fabelwesen)
+        const ytMatch = embed.url.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([a-zA-Z0-9_-]{11})/);
+        if (ytMatch) {
+          const ytId = ytMatch[1];
+          // Use maxresdefault for best quality
+          const ytThumbnailURL = `https://img.youtube.com/vi/${ytId}/maxresdefault.jpg`;
+          if (await this.#fetcher.test(ytThumbnailURL)) {
+            this.log('debug', `Set YouTube embed thumbnail URL to "${ytThumbnailURL}"`);
+            const originalThumbnailURL = embed.thumbnailURL;
+            embed.thumbnailURL = ytThumbnailURL;
+            const __replace = (o: { imageURLs: Record<string, string | null | undefined> }) => {
+              Object.keys(o.imageURLs).forEach((key) => {
+                if (o?.imageURLs[key] === originalThumbnailURL) {
+                  o.imageURLs[key] = ytThumbnailURL;
+                }
+              });
+            }
+            if (coverImage) {
+              __replace(coverImage);
+            }
+            if (thumbnail) {
+              __replace(thumbnail);
+            }
+            if (images) {
+              for (const img of images) {
+                __replace(img);
+                if (img.thumbnailURL === originalThumbnailURL) {
+                  img.thumbnailURL = ytThumbnailURL;
+                }
+              }
+            }
+          }
+          else {
+            this.log('debug', `Test failed for YouTube thumbnail URL "${ytThumbnailURL}". Going to use URL from API data.`);
+          }
+        }
+      }
+
+      // Tiers
+      let tiers: Tier[] = [];
+      const tierData = ObjectHelper.getProperty(postJSON, 'relationships.access_rules.data');
+      if (Array.isArray(tierData) && campaign) {
+        const c = campaign;
+        tiers = tierData.reduce<Tier[]>((result, t) => {
+          const id = ObjectHelper.getProperty(t, 'id');
+          if (id) {
+            const tier = this.findInAPIResponseIncludedArray(includedJSON, id, 'tier', c);
+            if (tier) {
+              result.push(tier);
+            }
+          }
+          return result;
+        }, []);
+      }
+      if (tiers.length === 0) {
+        this.log('warn', `Could not obtain tier info for post #${id}`);
+      }
+
+      // Collections
+      let collections: Collection[] = [];
+      const collectionsData = ObjectHelper.getProperty(postJSON, 'relationships.collections.data');
+      if (Array.isArray(collectionsData)) {
+        collections = collectionsData.reduce<Collection[]>((result, c) => {
+          const id = ObjectHelper.getProperty(c, 'id');
+          if (id) {
+            const collection = this.findInAPIResponseIncludedArray(includedJSON, id, 'collection');
+            if (collection) {
+              result.push(collection);
+            }
+          }
+          return result;
+        }, []);
+      }
+
+      // Tags
+      let tags: PostTag[] = [];
+      const tagsData = ObjectHelper.getProperty(postJSON, 'relationships.user_defined_tags.data');
+      if (Array.isArray(tagsData)) {
+        tags = tagsData.reduce<PostTag[]>((result, t) => {
+          const id = ObjectHelper.getProperty(t, 'id');
+          if (id) {
+            const tag = this.findInAPIResponseIncludedArray(includedJSON, id, 'post_tag');
+            if (tag) {
+              result.push(tag);
+            }
+          }
+          return result;
+        }, []);
+      }
+
+      const post: Post = {
+        id,
+        type: 'post',
+        postType: attributes.post_type || null,
+        isViewable,
+        url: attributes.url || null,
+        title: attributes.title || null,
+        content,
+        contentText: stripHtml(content || '').result,
+        teaserText,
+        publishedAt: attributes.published_at || null,
+        editedAt: attributes.edited_at || null,
+        commentCount: attributes.comment_count || 0,
+        coverImage,
+        thumbnail,
+        tiers,
+        collections,
+        tags,
+        embed,
+        attachments,
+        linkedAttachments,
+        audio,
+        audioPreview,
+        images,
+        videoPreview,
+        video,
+        campaign: null,
+        raw: json
+      };
+
+      this.log('debug', `Done parsing post #${id}`);
+
+      collection.items.push(post);
+    }
+
+    if (campaign) {
+      this.log('debug', `Campaign #${campaign.id} found while parsing posts`);
+      for (const post of collection.items) {
+        post.campaign = campaign;
+      }
+    }
+    else {
+      this.log('warn', 'No campaign info found while parsing posts');
+    }
+
+    this.log('debug', 'Done parsing posts');
+
+    return collection;
+  }
+
+  /**
+   * Returns `content` if value is not empty.
+   * Otherwise, returns HTML assembled from `content_json_string`.
+   * 
+   * Contributed by: Fabelwesen (https://github.com/Fabelwesen)
+   * Origin: https://github.com/patrickkfkan/patreon-dl/issues/119
+   * 
+   * @param data 
+   * @returns HTML or null
+   */
+  #parseContent(data: { content?: string | null; content_json_string?: string | null }) {
+    const { content, content_json_string } = data;
+    if (typeof content === 'string' && content.trim()) {
+      return content;
+    }
+    if (!content_json_string) {
+      return null;
+    }
+    try {
+      const doc = JSON.parse(content_json_string);
+      let parsedHTML = '';
+
+      function extractHTML(node: any) {
+        if (!node) return;
+
+        if (node.type === 'text') {
+          if (node.marks && node.marks.find((m: any) => m.type === 'link')) {
+            const linkMark = node.marks.find((m: any) => m.type === 'link');
+            parsedHTML += `<a href="${linkMark.attrs.href}" target="_blank">${node.text || ''}</a>`;
+          } else {
+            // You can expand this to handle bold, italic, etc.
+            parsedHTML += (String(node.text) || '');
+          }
+        } else if (node.type === 'paragraph' || node.type === 'heading' || node.type === 'listItem') {
+          parsedHTML += '<p>';
+          if (node.content && Array.isArray(node.content)) {
+            node.content.forEach(extractHTML);
+          }
+          parsedHTML += '</p>';
+        } else if (node.type === 'image') {
+          // Ensure media_id is passed so the local web server can link downloaded assets
+          const mediaIdAttr = (node.attrs && node.attrs.media_id) ? `data-media-id="${node.attrs.media_id}" ` : '';
+          const srcAttr = (node.attrs && node.attrs.src) ? node.attrs.src : '';
+          parsedHTML += `<img ${mediaIdAttr}src="${srcAttr}" />`;
+        } else if (node.content && Array.isArray(node.content)) {
+          node.content.forEach(extractHTML);
+        }
+      }
+
+      extractHTML(doc);
+      return parsedHTML;
+    } catch (e) {
+      this.log('warn', 'Failed to parse content_json_string:', e);
+    }
+    return null;
+  }
+
+  #getVideoMediaItemFromAttr(attrJSON: any, includedJSON: any, postId: string, strict: true): VideoMediaItem | null;
+  #getVideoMediaItemFromAttr(attrJSON: any, includedJSON: any, postId: string, strict?: false): VideoMediaItem;
+  #getVideoMediaItemFromAttr(attrJSON: any, includedJSON: any, postId: string, strict = false) {
+    let miFromIncluded: MediaItem | null = null;
+    const _mediaId = attrJSON.media_id !== undefined ? attrJSON.media_id.toString() : null;
+    const hasIncludedJSON = includedJSON && Array.isArray(includedJSON)
+    if (_mediaId && hasIncludedJSON) {
+      // Fetch item from 'included' array, matching `media_id`
+      miFromIncluded = this.findInAPIResponseIncludedArray(includedJSON, _mediaId, 'media', 'video');
+    }
+    const vidInc = miFromIncluded && miFromIncluded.type === 'video' ? miFromIncluded : null;
+    if (strict && !miFromIncluded) {
+      return null;
+    }
+    const mediaId = _mediaId || postId; // Fallback to post ID
+
+    const { download_url: downloadURL = null, url: displayURL = null } = attrJSON;
+
+    // Convert `attrJSON` to Downloadable (VideoMediaItem)
+    return {
+      type: 'video',
+      id: mediaId,
+      filename: vidInc?.filename || null,
+      mimeType: vidInc?.mimeType || null,
+      createdAt: vidInc?.createdAt || null,
+      size: {
+        width: attrJSON.width || vidInc?.size.width,
+        height: attrJSON.height || vidInc?.size.height
+      },
+      duration: attrJSON.duration || vidInc?.duration,
+      downloadURL: downloadURL || vidInc?.downloadURL,
+      displayURL: displayURL || vidInc?.downloadURL,
+      thumbnailURL: vidInc?.thumbnailURL || null
+    };
+  };
+}

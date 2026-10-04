@@ -1,0 +1,302 @@
+import Innertube, { Platform } from 'youtubei.js';
+import type * as InnertubeLib from 'youtubei.js';
+import fse from 'fs-extra';
+import tmp from 'tmp';
+import { type Dispatcher } from 'undici';
+import type Logger from '../logging/Logger.js';
+import { commonLog, type LogLevel } from '../logging/Logger.js';
+import { type DownloaderConfig } from '../../downloaders/Downloader.js';
+import { createProxyAgent } from '../Proxy.js';
+import { spawn } from 'child_process';
+import ObjectHelper from '../ObjectHelper.js';
+import { isDenoInstalled } from '../Misc.js';
+import { PoTokenMinter, type POTokenMinterWrapper } from './PoToken.js';
+
+/**
+ * Current implementation uses TV client for fetching videos. It does not require PO tokens.
+ */
+const USE_PO_TOKEN = false;
+
+export interface InnertubeLoaderGetInstanceResult {
+  innertube: Innertube;
+  getVideoInfo: (videoId: string) => Promise<InnertubeLib.YT.VideoInfo>
+  dispose: () => void;
+};
+
+Platform.shim.eval = (data: InnertubeLib.Types.BuildScriptResult, env: Record<string, InnertubeLib.Types.VMPrimative>) => {
+  const properties = [];
+
+  if(env.n) {
+    properties.push(`n: exportedVars.nFunction("${env.n}")`)
+  }
+
+  if (env.sig) {
+    properties.push(`sig: exportedVars.sigFunction("${env.sig}")`)
+  }
+
+  return InnertubeLoader.eval(data.output);
+};
+
+/**
+ * Creates an Innertube instance for fetching YouTube video info.
+ * 
+ * The current implementation fetches videos with:
+ * 1. "TV" client - if logged in;
+ * 2. Otherwise, "ANDROID_VR" client
+ * With this client, YouTube requires login most of the time.
+ * It's unclear if this is transitioning into a global requirement or if
+ * the IP address has just been flagged.
+ * 
+ * Other clients tested and failed to work:
+ * - WEB: only SABR streams available
+ * - WEB_EMBEDDED: "Video is unavailable" error
+ * - ANDROID: "Precondition check failed" error
+ * - MWEB: stream url returns 403 error even with PO token set -- maybe I'm doing it wrongly
+  */
+export default class InnertubeLoader {
+
+  static #name = 'InnertubeLoader';
+
+  static #instanceResult: InnertubeLoaderGetInstanceResult | null = null;
+  static #pendingPromise: Promise<InnertubeLoaderGetInstanceResult> | null = null;
+  static #logger?: Logger | null;
+  static #credentialsFile: string | null = null;
+  static #proxy: Dispatcher | undefined = undefined;
+  static #pathToDeno: string | null = null;
+  static #denoInstalled: boolean | undefined = undefined;
+
+  static setLogger(logger?: Logger | null) {
+    this.#logger = logger;
+  }
+
+  static async getInstance(options: DownloaderConfig<any>) {
+    if (this.#instanceResult) {
+      return this.#instanceResult;
+    }
+
+    if (this.#pendingPromise) {
+      return this.#pendingPromise;
+    }
+
+    this.log('info', 'Initialize YouTube downloader (this could take some time)')
+
+    if (!this.#proxy) {
+      const { agent } = createProxyAgent(options) || {};
+      if (agent) {
+        this.#proxy = agent;
+      }
+    }
+
+    this.#pathToDeno = options.pathToDeno;
+
+    this.#pendingPromise = this.#beginInitStage();
+
+    return this.#pendingPromise;
+  }
+
+  static #beginInitStage() {
+    return new Promise<InnertubeLoaderGetInstanceResult>((resolve) => {
+      this.#createInstance(resolve)
+        .catch((error: unknown) => {
+          this.log('error', 'Error initializing YouTube downloader:', error);
+        });
+    });
+  }
+
+  static async #createInstance(resolve: (value: InnertubeLoaderGetInstanceResult) => void) {
+    this.log('debug', 'Create Innertube instance...');
+    const credentials = this.#loadCredentials();
+    const minter = PoTokenMinter.createInstance({ proxyAgent: this.#proxy });
+    const sessionPot = USE_PO_TOKEN ? await this.#generateSessionPot(minter) : undefined;
+    const innertube = await Innertube.create({
+      po_token: sessionPot,
+      fetch: (input, init) => Platform.shim.fetch(input, { ...init, dispatcher: this.#proxy } as any)
+    });
+    if (credentials) {
+      const __updateCredentials = (data: any) => {
+        if (this.#credentialsFile) {
+          this.log('debug', 'YouTube credentials updated');
+          try {
+            fse.writeJsonSync(this.#credentialsFile, data.credentials);
+          }
+          catch (error) {
+            this.log('error', `Error writing updated YouTube credentials to ${this.#credentialsFile}:`, error);
+          }
+        }
+      };
+      try {
+        innertube.session.on('update-credentials', __updateCredentials);
+        await innertube.session.signIn(credentials);
+      }
+      catch (error: unknown) {
+        this.log('error', 'YouTube sign-in error:', error);
+      }
+      finally {
+        innertube.session.off('update-credentials', __updateCredentials);
+      }
+      if (innertube.session.logged_in) {
+        this.log('debug', 'YouTube signed in');
+      }
+      else {
+        this.log('warn', 'YouTube sign-in failed. Continuing without sign-in.');
+      }
+    }
+   this.#resolveGetInstanceResult(innertube, minter, resolve);
+  }
+
+  static async #generateSessionPot(minter: POTokenMinterWrapper) {
+    const innertube = await Innertube.create({
+      fetch: (input, init) => Platform.shim.fetch(input, { ...init, dispatcher: this.#proxy } as any)
+    });
+    const visitorData = innertube.session.context.client.visitorData;
+    if (visitorData) {
+      const sessionPot = await minter.pot(visitorData);
+      this.log('debug', 'Generated session PO token from visitorData:', sessionPot);
+      return sessionPot;
+    }
+    this.log('warn', 'visitorData not found - no session PO token used');
+  }
+
+  static #resolveGetInstanceResult(innertube: Innertube, minter: POTokenMinterWrapper, resolve: (value: InnertubeLoaderGetInstanceResult) => void) {
+    this.#pendingPromise = null;
+    const signedIn = innertube.session.logged_in;
+    this.log('debug', 'Create YouTube PO token minter');
+    this.#instanceResult = {
+      innertube,
+      getVideoInfo: async (videoId) => {
+        let pot: string | undefined = undefined;
+        if (USE_PO_TOKEN) {
+          try {
+            pot = await minter.pot(videoId);
+            this.log('debug', `Obtained PO token for YouTube video ${videoId}: `, pot);
+          }
+          catch (error) {
+            this.log('warn', `Could not obtain PO token for YouTube video ${videoId}:`, error);
+            pot = undefined;
+          }
+        }
+        const client = signedIn ? 'TV' : 'ANDROID_VR';
+        this.log('debug', `Selected client: ${client}`);
+        const info = await innertube.getBasicInfo(videoId, { client, po_token: pot });
+        return info;
+      },
+      dispose: () => {
+        minter.dispose();
+      }
+    };
+    this.log('info', `YouTube downloader initialized (signed-in: ${signedIn ? 'yes' : 'no'})`);
+    resolve(this.#instanceResult);
+  }
+
+  static setCredentialsFile(file: string) {
+    this.#credentialsFile = file;
+  }
+
+  static #loadCredentials() {
+    if (!this.#credentialsFile) {
+      return null;
+    }
+    try {
+      this.log('debug', `Load YouTube credentials from "${this.#credentialsFile}"`);
+      return fse.readJSONSync(this.#credentialsFile);
+    }
+    catch (error) {
+      this.log('error', `Error loading YouTube credentials from "${this.#credentialsFile}":`, error);
+      return null;
+    }
+  }
+
+  static #evalByDeno(code: string) {
+    return new Promise<any>((resolve, reject) => {
+      this.log('debug', 'Begin Deno eval');
+      const safeCode = code
+        .replace(/\\/g, '\\\\')
+        .replace(/\$\{/g, '\\${')
+        .replace(/`/g, '\\`');
+      const wrappedCode = `
+        try {
+          const result = await new Function(\`${safeCode}\`)();
+          console.log(JSON.stringify({ result }));
+        }
+        catch (error) {
+          console.log(JSON.stringify({
+            result: null,
+            error: error instanceof Error ? error.message : String(error)
+          }));
+        }
+      `;
+      tmp.setGracefulCleanup();
+      const tmpobj = tmp.fileSync();
+      fse.writeFileSync(tmpobj.fd, wrappedCode);
+      this.log('debug', `deno run --allow-read "${tmpobj.name}"`);
+      const denoProcess = spawn(this.#pathToDeno || 'deno', ['run', '--allow-read', tmpobj.name]);
+      let output = '';
+
+      denoProcess.stdout.on('data', (data: Buffer) => {
+        output += data.toString();
+      });
+
+      denoProcess.stderr.on('data', (err) => {
+        this.log('error', '(stderr) Deno eval:', err.toString());
+      });
+
+      denoProcess.on('close', () => {
+        try {
+          const result = JSON.parse(output.trim());
+          const resultValue = ObjectHelper.getProperty(result, 'result');
+          const resultErr = ObjectHelper.getProperty(result, 'error');
+          if (resultErr) {
+            return reject(Error(resultErr));
+          }
+          this.log('debug', 'Deno eval result:', resultValue);
+          return resolve(resultValue);
+        } catch (e) {
+          return reject(Error('Could not parse result of Deno eval', { cause: e }));
+        }
+      });
+    });
+  }
+
+  static eval(code: string) {
+    if (this.#denoInstalled === undefined) {
+      const denoInstalled = isDenoInstalled(this.#pathToDeno || undefined);
+      if (!denoInstalled.installed) {
+        if (denoInstalled.error) {
+          this.log('warn', 'Deno not found or failed to start:', denoInstalled.error);
+        }
+        else {
+          this.log('warn', 'Deno not found or failed to start');
+        }
+        this.log('warn', 'No sandboxing available for executed code');
+      }
+      else {
+        this.log('debug', 'Deno found');
+      }
+      this.#denoInstalled = denoInstalled.installed;
+    }
+
+    return this.#denoInstalled ? this.#evalByDeno(code) : this.#unsafeEval(code);
+  }
+
+  static #unsafeEval(code: string) {
+    this.log('debug', 'Begin unsafe eval');
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval
+    const result = new Function(code)();
+    this.log('debug', 'Unsafe eval result:', result);
+    return result;
+  }
+
+  static reset() {
+    if (this.#instanceResult) {
+      this.#instanceResult.dispose();
+      this.#instanceResult = null;
+    }
+    this.#proxy = undefined;
+    this.#pendingPromise = null;
+    this.#denoInstalled = undefined;
+  }
+
+  protected static log(level: LogLevel, ...msg: any[]) {
+    commonLog(this.#logger, level, this.#name, ...msg);
+  }
+}
