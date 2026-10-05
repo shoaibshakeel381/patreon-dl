@@ -626,6 +626,18 @@ export default class PostDownloader extends Downloader<Post> {
     
           await batch.start();
 
+          // Leave a yt-dlp command alongside the embed info when a video
+          // could not be downloaded, so it can be retried manually later.
+          if (post.embed?.type === 'videoEmbed' && post.embed.url &&
+            batch.getTasks('error').some((task) => task.srcEntity === post.embed)) {
+            const command = `yt-dlp.exe -f "bv*[height<=720]+ba/b[height<=720]" -N 8 --merge-output-format mp4 --continue --no-part -i --embed-metadata --embed-chapters --sleep-interval 10 --cookies-from-browser firefox -o "%(title)s - %(id)s.%(ext)s" "${post.embed.url}"`;
+            this.fsHelper.createDir(postDirs.embed);
+            const commandFile = path.resolve(postDirs.embed, 'yt-dlp-command.sh');
+            const saveCommandResult = await this.fsHelper.writeTextFile(
+              commandFile, `#!/bin/sh\n${command}\n`, this.config.fileExistsAction.content);
+            this.logWriteTextFileResult(saveCommandResult, post, 'yt-dlp fallback command');
+          }
+
           hasDownloadPostError = batch.getTasks('error').length > 0 || createTaskErrorCount > 0;
 
         }
