@@ -114,6 +114,13 @@ Defined in: [src/downloaders/DownloaderOptions.ts:249](https://github.com/patric
 
 > **postsInTier**: `"any"` \| `string`[]
 
+#### include.postsTitleRegex
+
+> **postsTitleRegex**: `string`
+
+Default: empty string (no title filtering). Accepts regex literals with flags,
+such as `/flower/i`, or plain pattern text.
+
 #### include.postsPublished
 
 > **postsPublished**: `object`

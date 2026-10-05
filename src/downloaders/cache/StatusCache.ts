@@ -26,6 +26,7 @@ export type StatusCacheConfigIncludes<T extends StatusCacheTarget> = {
   previewMedia: DownloaderConfig<T>['include']['previewMedia'];
   contentMedia: DownloaderConfig<T>['include']['contentMedia'];
   allMediaVariants: boolean;
+  postsTitleRegex: string;
 } & (
   T extends Post ? {
     comments: boolean;
@@ -258,6 +259,10 @@ export default class StatusCache {
     else if (this.#isTargetType(target, 'post') && !__compareConfigInclude<Post>('comments')) {
       return this.#validationResult<Post>(target, true, ['comments']);
     }
+    else if (this.#isTargetType(target, 'post') && entry.lastDownloadConfig.include.postsTitleRegex !== config.include.postsTitleRegex) {
+      this.log('debug', `-> Invalidated: downloader config 'include.postsTitleRegex' has changed`);
+      return this.#validationResult<Post>(target, true);
+    }
     if (!entry.lastTargetInfo) {
       this.log('debug', '-> Invalidated: \'lastTargetInfo\' missing in status cache entry');
       return this.#validationResult(target, true);
@@ -345,7 +350,8 @@ export default class StatusCache {
           contentInfo: config.include.contentInfo,
           previewMedia: config.include.previewMedia,
           contentMedia: config.include.contentMedia,
-          allMediaVariants: config.include.allMediaVariants
+          allMediaVariants: config.include.allMediaVariants,
+          postsTitleRegex: config.include.postsTitleRegex
         }
       }
     };

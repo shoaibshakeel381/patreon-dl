@@ -4,6 +4,7 @@ import { type LogLevel } from "../utils/logging/Logger.js";
 import type Logger from "../utils/logging/Logger.js";
 import { commonLog } from "../utils/logging/Logger.js";
 import { type DownloaderConfig } from "./Downloader.js";
+import { compilePostTitleRegex } from "./PostTitleRegex.js";
 
 export type IncludeCriteriaCheckPostResult = {
   ok: true;
@@ -27,6 +28,11 @@ export class IncludeCriteriaHelper {
 
   constructor(logger?: Logger | null) {
     this.logger = logger;
+  }
+
+  postTitleMatchesRegex(post: Post, config: DownloaderConfig<Post>) {
+    const postsTitleRegex = config.include.postsTitleRegex;
+    return !!postsTitleRegex && compilePostTitleRegex(postsTitleRegex).test(post.title || '');
   }
 
   checkPost(post: Post, config: DownloaderConfig<Post>): IncludeCriteriaCheckPostResult {

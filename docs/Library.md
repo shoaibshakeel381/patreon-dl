@@ -119,6 +119,12 @@ To download posts belonging to specific tier(s), set the `include.postsInTier` o
 - `any`: any tier (i.e. no filter)
 - Array of tier IDs (`string[]`)
 
+To skip posts whose titles match a JavaScript regular expression, set
+`include.postsTitleRegex`. You may provide a full regex literal with flags, such
+as `/flower/i`, or plain pattern text such as `flower`. Matching is performed
+anywhere in the title unless the expression uses anchors such as `^` or `$`.
+Leave it empty to include all titles.
+
 To obtain the IDs of tiers for a particular creator, first get the campaign through `PatreonDownloader.getCampaign()`, then inspect the `rewards` property:
 
 ```

@@ -222,6 +222,7 @@ include.posts.in.tier = 123456, 789100
 #
 # include.locked.content
 # include.posts.with.media.type
+# include.posts.title.regex (skip posts whose titles match this regex)
 # include.posts.published.after
 # include.posts.published.before
 # include.campaign.info

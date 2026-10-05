@@ -135,6 +135,7 @@ export default class PostDownloader extends Downloader<Post> {
       let skippedUnmetMediaTypeCriteria = 0;
       let skippedNotInTier = 0;
       let skippedPublishDateOutOfRange = 0;
+      let skippedTitleMatchesRegex = 0;
       let campaignSaved = false;
       let stopConditionMet = false;
       const collectionSaves = new Map<string, Promise<void>>();
@@ -142,6 +143,7 @@ export default class PostDownloader extends Downloader<Post> {
       const directoryLocks = new Map<string, Promise<void>>();
       const seenPostIds = new Set<string>();
       const postsParser = new PostParser(this.fetcher, this.logger);
+      const includeCriteriaHelper = new IncludeCriteriaHelper(this.logger);
       while (postsFetcher.hasNext()) {
         const { list, aborted, error } = await postsFetcher.next();
         if (aborted) {
@@ -152,6 +154,31 @@ export default class PostDownloader extends Downloader<Post> {
           return;
         }
         if (!list) break;
+
+        // Remove title matches before creating post workers, so they do not
+        // trigger per-post collection handling, refresh requests, or downloads.
+        const postsToProcess: Post[] = [];
+        for (const post of list.items) {
+          if (seenPostIds.has(post.id)) {
+            this.log('debug', `Post #${post.id} already scheduled`);
+            continue;
+          }
+          if (includeCriteriaHelper.postTitleMatchesRegex(post, this.config)) {
+            seenPostIds.add(post.id);
+            this.log('info', `Skipped downloading post #${post.id}: title matches include.posts.title.regex`);
+            this.emit('targetBegin', { target: post });
+            this.emit('targetEnd', {
+              target: post,
+              isSkipped: true,
+              skipReason: TargetSkipReason.TitleMatchesRegex,
+              skipMessage: 'Post title matches regex'
+            });
+            skippedTitleMatchesRegex++;
+            continue;
+          }
+          postsToProcess.push(post);
+        }
+
         if (!this.#context.skipSaveCampaign && !campaignSaved && list.items[0]?.campaign) {
           await this.saveCampaignInfo(list.items[0].campaign, signal);
           campaignSaved = true;
@@ -289,7 +316,7 @@ export default class PostDownloader extends Downloader<Post> {
         };
         const worker = async () => {
           while (!signal.aborted && !stopConditionMet) {
-            const post = list.items[nextIndex++];
+            const post = postsToProcess[nextIndex++];
             if (!post) return;
             if (seenPostIds.has(post.id)) {
               this.log('debug', `Post #${post.id} already scheduled`);
@@ -303,7 +330,7 @@ export default class PostDownloader extends Downloader<Post> {
         let workerError: unknown;
         let hasWorkerError = false;
         try {
-          const workers = Array.from({ length: Math.min(maxConcurrentPosts, list.items.length) }, () => worker().catch((error: unknown) => {
+          const workers = Array.from({ length: Math.min(maxConcurrentPosts, postsToProcess.length) }, () => worker().catch((error: unknown) => {
             if (!hasWorkerError) {
               workerError = error;
               hasWorkerError = true;
@@ -367,6 +394,9 @@ export default class PostDownloader extends Downloader<Post> {
         }
         if (skippedPublishDateOutOfRange) {
           skippedStrParts.push(`${skippedPublishDateOutOfRange} with publish date out of range`);
+        }
+        if (skippedTitleMatchesRegex) {
+          skippedStrParts.push(`${skippedTitleMatchesRegex} with titles matching regex`);
         }
         const skippedStr = skippedStrParts.length > 0 ? ` (skipped: ${skippedStrParts.join(', ')})` : '';
         endMessage = `Total ${downloaded} / ${postsFetcher.getTotal()} posts processed${skippedStr}`;

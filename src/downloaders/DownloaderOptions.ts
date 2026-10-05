@@ -2,6 +2,7 @@ import path from 'path';
 import type Logger from '../utils/logging/Logger.js';
 import { type DeepRequired, pickDefined } from '../utils/Misc.js';
 import type DateTime from '../utils/DateTime.js';
+import { compilePostTitleRegex } from './PostTitleRegex.js';
 
 const DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0';
 
@@ -24,6 +25,7 @@ export interface DownloaderIncludeOptions {
   lockedContent?: boolean;
   postsWithMediaType?: Array<'image' | 'video' | 'audio' | 'attachment' | 'podcast'> | 'any' | 'none';
   postsInTier?: Array<string> | 'any';
+  postsTitleRegex?: string;
   postsPublished?: {
     after?: DateTime | null;
     before?: DateTime | null;
@@ -128,6 +130,7 @@ const DEFAULT_DOWNLOADER_INIT: DownloaderInit = {
     lockedContent: true,
     postsWithMediaType: 'any',
     postsInTier: 'any',
+    postsTitleRegex: '',
     postsPublished: {
       after: null,
       before: null
@@ -177,6 +180,15 @@ export function getDownloaderInit(options?: DownloaderOptions): DownloaderInit {
   if (!Number.isSafeInteger(maxConcurrentPosts) || maxConcurrentPosts < 1) {
     throw Error('maxConcurrentPosts must be a positive integer');
   }
+  const postsTitleRegex = pickDefined(options?.include?.postsTitleRegex, defaults.include.postsTitleRegex);
+  if (postsTitleRegex) {
+    try {
+      compilePostTitleRegex(postsTitleRegex);
+    }
+    catch (error) {
+      throw new Error(`include.postsTitleRegex is not a valid regular expression: ${error instanceof Error ? error.message : error}`);
+    }
+  }
 
   let proxy: DownloaderInit['request']['proxy'] = null;
   if (options?.request?.proxy && defaults.request.proxy) {
@@ -208,6 +220,7 @@ export function getDownloaderInit(options?: DownloaderOptions): DownloaderInit {
       lockedContent: pickDefined(options?.include?.lockedContent, defaults.include.lockedContent),
       postsWithMediaType: pickDefined(options?.include?.postsWithMediaType, defaults.include.postsWithMediaType),
       postsInTier: pickDefined(options?.include?.postsInTier, defaults.include.postsInTier),
+      postsTitleRegex,
       postsPublished: {
         after: pickDefined(options?.include?.postsPublished?.after, defaults.include.postsPublished.after),
         before: pickDefined(options?.include?.postsPublished?.before, defaults.include.postsPublished.before)
