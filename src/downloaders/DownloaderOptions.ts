@@ -76,6 +76,7 @@ export interface DownloaderOptions {
   request?: {
     maxRetries?: number;
     maxConcurrent?: number;
+    maxConcurrentPosts?: number;
     minTime?: number;
     proxy?: ProxyOptions | null;
     userAgent?: string;
@@ -152,6 +153,7 @@ const DEFAULT_DOWNLOADER_INIT: DownloaderInit = {
   request: {
     maxRetries: 3,
     maxConcurrent: 10,
+    maxConcurrentPosts: 1,
     minTime: 333,
     proxy: {
       url: '',
@@ -171,6 +173,10 @@ const DEFAULT_DOWNLOADER_INIT: DownloaderInit = {
 
 export function getDownloaderInit(options?: DownloaderOptions): DownloaderInit {
   const defaults = DEFAULT_DOWNLOADER_INIT;
+  const maxConcurrentPosts = pickDefined(options?.request?.maxConcurrentPosts, defaults.request.maxConcurrentPosts);
+  if (!Number.isSafeInteger(maxConcurrentPosts) || maxConcurrentPosts < 1) {
+    throw Error('maxConcurrentPosts must be a positive integer');
+  }
 
   let proxy: DownloaderInit['request']['proxy'] = null;
   if (options?.request?.proxy && defaults.request.proxy) {
@@ -227,6 +233,7 @@ export function getDownloaderInit(options?: DownloaderOptions): DownloaderInit {
     request: {
       maxRetries: pickDefined(options?.request?.maxRetries, defaults.request.maxRetries),
       maxConcurrent: pickDefined(options?.request?.maxConcurrent, defaults.request.maxConcurrent),
+      maxConcurrentPosts,
       minTime: pickDefined(options?.request?.minTime, defaults.request.minTime),
       proxy,
       userAgent: pickDefined(options?.request?.userAgent, defaults.request.userAgent)

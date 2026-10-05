@@ -109,7 +109,7 @@ export default class PostsFetcher extends EventEmitter {
   }
 
   begin() {
-    void this.#doBegin();
+    return this.#doBegin().catch((error: unknown) => this.#handleError(error));
   }
 
   async #doBegin() {

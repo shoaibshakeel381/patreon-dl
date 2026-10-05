@@ -48,6 +48,7 @@ const CONFIG_FILE_PROPS = {
   request: {
     maxRetries: 'request:max.retries',
     maxConcurrent: 'request:max.concurrent',
+    maxConcurrentPosts: 'request:max.concurrent.posts',
     minTime: 'request:min.time',
     proxy: {
       url: 'request:proxy.url',
@@ -147,6 +148,7 @@ export default class ConfigFileParser {
       request: {
         maxRetries: __getValue(CONFIG_FILE_PROPS.request.maxRetries),
         maxConcurrent: __getValue(CONFIG_FILE_PROPS.request.maxConcurrent),
+        maxConcurrentPosts: __getValue(CONFIG_FILE_PROPS.request.maxConcurrentPosts),
         minTime: __getValue(CONFIG_FILE_PROPS.request.minTime),
         proxy: {
           url: __getValue(CONFIG_FILE_PROPS.request.proxy.url),

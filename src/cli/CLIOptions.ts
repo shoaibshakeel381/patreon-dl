@@ -87,6 +87,7 @@ export function getCLIOptions(skipTargetURLs = false): CLIOptions | Omit<CLIOpti
     request: {
       maxRetries: CLIOptionValidator.validateNumber(pickDefined(commandLineOptions?.request?.maxRetries, configFileOptions?.request?.maxRetries)),
       maxConcurrent: CLIOptionValidator.validateNumber(pickDefined(commandLineOptions?.request?.maxConcurrent, configFileOptions?.request?.maxConcurrent)),
+      maxConcurrentPosts: CLIOptionValidator.validatePositiveInteger(pickDefined(commandLineOptions?.request?.maxConcurrentPosts, configFileOptions?.request?.maxConcurrentPosts)),
       minTime: CLIOptionValidator.validateNumber(pickDefined(commandLineOptions?.request?.minTime, configFileOptions?.request?.minTime)),
       proxy,
       userAgent: CLIOptionValidator.validateString(pickDefined(commandLineOptions?.request?.userAgent, configFileOptions?.request?.userAgent))

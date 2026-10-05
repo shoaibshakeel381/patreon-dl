@@ -36,6 +36,13 @@ export default class PostDownloader extends Downloader<Post> {
 
   #startPromise: Promise<void> | null = null;
   #context: DeepRequired<PostDownloaderContext>;
+  #processingPosts = false;
+
+  protected override checkAbortSignal(signal: AbortSignal | undefined) {
+    // Emit the downloader's abort event only after all post workers have settled.
+    if (this.#processingPosts) return signal?.aborted === true;
+    return super.checkAbortSignal(signal);
+  }
 
   constructor(
     config: DownloaderConfig<Post>,
@@ -63,8 +70,13 @@ export default class PostDownloader extends Downloader<Post> {
   }
 
   async #doStart(params?: DownloaderStartParams): Promise<void> {
+    const controller = new AbortController();
+    const signal = controller.signal;
+    const abort = () => controller.abort(params?.signal?.reason);
+    params?.signal?.addEventListener('abort', abort, { once: true });
+    if (params?.signal?.aborted) abort();
+    let fetching: Promise<void> | undefined;
     try {
-      const { signal } = params || {};
       const postFetch = this.config.postFetch;
       const db = await this.db();
 
@@ -109,7 +121,12 @@ export default class PostDownloader extends Downloader<Post> {
           this.emit('fetchBegin', { targetType: postsFetcher.getTargetType() });
         }
       });
-      postsFetcher.begin();
+      fetching = postsFetcher.begin();
+      const maxConcurrentPosts = this.config.stopOn !== 'never' ? 1 : this.config.request.maxConcurrentPosts;
+      if (this.config.request.maxConcurrentPosts > 1 && this.config.stopOn !== 'never') {
+        this.log('info', `Parallel post downloads skipped: stop condition "${this.config.stopOn}" requires serial processing`);
+      }
+      this.log('info', `Process up to ${maxConcurrentPosts} posts concurrently`);
 
       // Step 2: download posts in each fetched list
       let downloaded = 0;
@@ -120,17 +137,21 @@ export default class PostDownloader extends Downloader<Post> {
       let skippedPublishDateOutOfRange = 0;
       let campaignSaved = false;
       let stopConditionMet = false;
-      const savedCollectionIds: string[] = [];
+      const collectionSaves = new Map<string, Promise<void>>();
+      const statusCaches = new Map<string, StatusCache>();
+      const directoryLocks = new Map<string, Promise<void>>();
+      const seenPostIds = new Set<string>();
       const postsParser = new PostParser(this.fetcher, this.logger);
       while (postsFetcher.hasNext()) {
         const { list, aborted, error } = await postsFetcher.next();
-        if (!list || aborted) {
+        if (aborted) {
           break;
         }
         if (!list && error) {
           this.emit('end', { aborted: false, error, message: 'PostsFetcher error' });
           return;
         }
+        if (!list) break;
         if (!this.#context.skipSaveCampaign && !campaignSaved && list.items[0]?.campaign) {
           await this.saveCampaignInfo(list.items[0].campaign, signal);
           campaignSaved = true;
@@ -139,29 +160,23 @@ export default class PostDownloader extends Downloader<Post> {
           }
         }
 
-        for (const _post of list.items) {
-
-          if (stopConditionMet) {
-            break;
-          }
-
+        let nextIndex = 0;
+        const processPost = async (_post: Post) => {
           let post = _post;
 
           // Collections
           if (post.campaign && post.collections) {
             for (const collection of post.collections) {
-              if (!savedCollectionIds.includes(collection.id)) {
-                try {
-                  await this.#saveCollection(collection, post.campaign);
-                  savedCollectionIds.push(collection.id);
-                }
-                catch (error) {
+              const key = `${post.campaign.id}:${collection.id}`;
+              let saving = collectionSaves.get(key);
+              if (!saving) {
+                saving = this.#saveCollection(collection, post.campaign, signal).catch((error: unknown) => {
+                  collectionSaves.delete(key);
                   this.log('error', `Failed to save collection #${collection.id}:`, error);
-                }
+                });
+                collectionSaves.set(key, saving);
               }
-              else {
-                this.log('debug', `Collection #${collection.id} already processed`);
-              }
+              await saving;
             }
           }
 
@@ -199,62 +214,109 @@ export default class PostDownloader extends Downloader<Post> {
           const postDirs = this.fsHelper.getPostDirs(post);
           this.log('debug', 'Post directories:', postDirs);
 
-          // Step 4.2: Check with status cache
-          const statusCache = StatusCache.getInstance(this.config, postDirs.statusCache, this.logger);
-          const statusCacheValidation = statusCache.validate(post, postDirs.root, this.config)
-          if (!statusCacheValidation.invalidated) {
-            this.log('info', `Skipped downloading post #${post.id}: already downloaded and nothing has changed since last download`);
-            this.emit('targetEnd', {
-              target: post,
-              isSkipped: true,
-              skipReason: TargetSkipReason.AlreadyDownloaded,
-              skipMessage: 'Target already downloaded and nothing has changed since last download'
-            });
-            skippedRedundant++;
-            if (this.config.stopOn === 'postPreviouslyDownloaded' || 
-              this.config.stopOn === 'previouslyDownloaded'
-            ) {
-              stopConditionMet = true;
+          const rootKey = process.platform === 'win32' ? postDirs.root.toLowerCase() : postDirs.root;
+          const previous = directoryLocks.get(rootKey);
+          let release!: () => void;
+          const lock = new Promise<void>((resolve) => { release = resolve; });
+          directoryLocks.set(rootKey, lock);
+          try {
+            await previous;
+            if (signal.aborted) return;
+            // Step 4.2: Check with status cache
+            let statusCache = statusCaches.get(postDirs.statusCache);
+            if (!statusCache) {
+              statusCache = StatusCache.getInstance(this.config, postDirs.statusCache, this.logger);
+              statusCaches.set(postDirs.statusCache, statusCache);
             }
-            continue;
-          }
-          
-          switch ((await this.#doDownload(
-            post,
-            postDirs,
-            statusCacheValidation.scope,
-            statusCache,
-            db,
-            signal
-          )).status) {
-            case 'aborted':
-              return;
-            case 'downloaded':
-              downloaded++;
-              break;
-            case 'skippedNotInTier':
-              skippedNotInTier++;
-              break;
-            case 'skippedPublishDateOutOfRange':
-              skippedPublishDateOutOfRange++;
-              if (this.config.stopOn === 'postPublishDateOutOfRange' ||
-                this.config.stopOn === 'publishDateOutOfRange'
+            const statusCacheValidation = statusCache.validate(post, postDirs.root, this.config)
+            if (!statusCacheValidation.invalidated) {
+              this.log('info', `Skipped downloading post #${post.id}: already downloaded and nothing has changed since last download`);
+              this.emit('targetEnd', {
+                target: post,
+                isSkipped: true,
+                skipReason: TargetSkipReason.AlreadyDownloaded,
+                skipMessage: 'Target already downloaded and nothing has changed since last download'
+              });
+              skippedRedundant++;
+              if (this.config.stopOn === 'postPreviouslyDownloaded' ||
+                this.config.stopOn === 'previouslyDownloaded'
               ) {
                 stopConditionMet = true;
               }
-              break;
-            case 'skippedUnmetMediaTypeCriteria':
-              skippedUnmetMediaTypeCriteria++;
-              break;
-            case 'skippedUnviewable':
-              skippedUnviewable++;
-              break;
-          }
+              return;
+            }
 
-          if (this.checkAbortSignal(signal)) {
-            return;
+            switch ((await this.#doDownload(
+              post,
+              postDirs,
+              statusCacheValidation.scope,
+              statusCache,
+              db,
+              signal
+            )).status) {
+              case 'aborted':
+                return;
+              case 'downloaded':
+                downloaded++;
+                break;
+              case 'skippedNotInTier':
+                skippedNotInTier++;
+                break;
+              case 'skippedPublishDateOutOfRange':
+                skippedPublishDateOutOfRange++;
+                if (this.config.stopOn === 'postPublishDateOutOfRange' ||
+                  this.config.stopOn === 'publishDateOutOfRange'
+                ) {
+                  stopConditionMet = true;
+                }
+                break;
+              case 'skippedUnmetMediaTypeCriteria':
+                skippedUnmetMediaTypeCriteria++;
+                break;
+              case 'skippedUnviewable':
+                skippedUnviewable++;
+                break;
+            }
+
+            if (this.checkAbortSignal(signal)) {
+              return;
+            }
           }
+          finally {
+            release();
+            if (directoryLocks.get(rootKey) === lock) directoryLocks.delete(rootKey);
+          }
+        };
+        const worker = async () => {
+          while (!signal.aborted && !stopConditionMet) {
+            const post = list.items[nextIndex++];
+            if (!post) return;
+            if (seenPostIds.has(post.id)) {
+              this.log('debug', `Post #${post.id} already scheduled`);
+              continue;
+            }
+            seenPostIds.add(post.id);
+            await processPost(post);
+          }
+        };
+        this.#processingPosts = true;
+        let workerError: unknown;
+        let hasWorkerError = false;
+        try {
+          const workers = Array.from({ length: Math.min(maxConcurrentPosts, list.items.length) }, () => worker().catch((error: unknown) => {
+            if (!hasWorkerError) {
+              workerError = error;
+              hasWorkerError = true;
+            }
+            controller.abort(error);
+          }));
+          await Promise.all(workers);
         }
+        finally {
+          this.#processingPosts = false;
+        }
+        if (hasWorkerError && !params?.signal?.aborted) throw workerError;
+        if (this.checkAbortSignal(signal)) return;
 
         if (stopConditionMet) {
           break;
@@ -313,6 +375,9 @@ export default class PostDownloader extends Downloader<Post> {
       this.emit('end', { aborted: false, message: endMessage });
     }
     finally {
+      controller.abort();
+      await fetching;
+      params?.signal?.removeEventListener('abort', abort);
       if (!this.#context.keepDBOpen) {
         await this.closeDB();
       }
@@ -533,9 +598,9 @@ export default class PostDownloader extends Downloader<Post> {
 
           hasDownloadPostError = batch.getTasks('error').length > 0 || createTaskErrorCount > 0;
 
-          await batch.destroy();
         }
         finally {
+          await batch.destroy();
           if (signal) {
             signal.removeEventListener('abort', abortHandler);
           }
