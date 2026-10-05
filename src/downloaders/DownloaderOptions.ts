@@ -22,6 +22,7 @@ export type StopOnCondition =
   | 'postPublishDateOutOfRange';
 
 export interface DownloaderIncludeOptions {
+  postsSortOrder?: 'newest' | 'oldest' | 'popular' | 'collection';
   lockedContent?: boolean;
   postsWithMediaType?: Array<'image' | 'video' | 'audio' | 'attachment' | 'podcast'> | 'any' | 'none';
   postsInTier?: Array<string> | 'any';
@@ -127,6 +128,7 @@ const DEFAULT_DOWNLOADER_INIT: DownloaderInit = {
     media: '{media.filename}'
   },
   include: {
+    postsSortOrder: 'newest',
     lockedContent: true,
     postsWithMediaType: 'any',
     postsInTier: 'any',
@@ -217,6 +219,7 @@ export function getDownloaderInit(options?: DownloaderOptions): DownloaderInit {
       media: options?.filenameFormat?.media || defaults.filenameFormat.media
     },
     include: {
+      postsSortOrder: pickDefined(options?.include?.postsSortOrder, defaults.include.postsSortOrder),
       lockedContent: pickDefined(options?.include?.lockedContent, defaults.include.lockedContent),
       postsWithMediaType: pickDefined(options?.include?.postsWithMediaType, defaults.include.postsWithMediaType),
       postsInTier: pickDefined(options?.include?.postsInTier, defaults.include.postsInTier),

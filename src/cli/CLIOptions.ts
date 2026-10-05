@@ -164,6 +164,7 @@ function getCLIIncludeOptions(commandLineOptions: CommandLineParseResult, config
     postsWithMediaType: CLIOptionValidator.validateIncludeContentWithMediaType(pickDefined(commandLineOptions.include?.postsWithMediaType, configFileOptions?.include?.postsWithMediaType)),
     postsInTier: CLIOptionValidator.validateIncludeContentInTier(pickDefined(commandLineOptions.include?.postsInTier, configFileOptions?.include?.postsInTier)),
     postsTitleRegex: CLIOptionValidator.validateString(pickDefined(commandLineOptions.include?.postsTitleRegex, configFileOptions?.include?.postsTitleRegex)),
+    postsSortOrder: CLIOptionValidator.validateString(pickDefined(commandLineOptions.include?.postsSortOrder, configFileOptions?.include?.postsSortOrder), 'newest', 'oldest', 'popular', 'collection'),
     postsPublished: {
       after: CLIOptionValidator.validateDateTime(pickDefined(commandLineOptions.include?.postsPublished?.after, configFileOptions?.include?.postsPublished?.after)) || null,
       before: CLIOptionValidator.validateDateTime(pickDefined(commandLineOptions.include?.postsPublished?.before, configFileOptions?.include?.postsPublished?.before)) || null,
