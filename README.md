@@ -115,7 +115,7 @@ $ patreon-dl [OPTION]... URL
 | `--ffmpeg <path>` | `-f` | Path to FFmpeg executable |
 | `--deno <path>` | `-d` | Path to Deno executable |
 | `--out-dir <path>` |`-o` | Directory to save content |
-| `--max-concurrent-posts <number>` | | Post processing concurrency (default: 1). Stop conditions force serial processing. |
+| `--max-concurrent-posts <number>` | | Maximum number of posts to process concurrently (default: 1). Applies when a stop condition is set too. |
 | `--log-level <level>` | `-l` | Log level of the console logger: `info`, `debug`, `warn` or `error`; set to `none` to disable the logger. |
 | `--no-prompt` | `-y` | Do not prompt for confirmation to proceed |
 | `--dry-run`   |      | Run without writing files to disk (except logs, if any). Intended for testing / debugging. |
@@ -128,9 +128,10 @@ $ patreon-dl [OPTION]... URL
 To download posts concurrently, use `--max-concurrent-posts 2`, set
 `max.concurrent.posts = 2` under `[request]` in the configuration file, or
 pass `{ request: { maxConcurrentPosts: 2 } }` to the library. The default is `1`.
-Any `stop.on` condition other than `never` forces serial post processing and
-logs the reason. Each post uses its own `request.max.concurrent` limit;
-HLS videos retain their independent segment-download limits.
+This setting also applies when `stop.on` is set. When a stop condition is met,
+no more posts are scheduled, but posts already in progress may finish and be
+downloaded. Each post uses its own `request.max.concurrent` limit; HLS videos
+retain their independent segment-download limits.
 
 ### URL
 

@@ -122,10 +122,7 @@ export default class PostDownloader extends Downloader<Post> {
         }
       });
       fetching = postsFetcher.begin();
-      const maxConcurrentPosts = this.config.stopOn !== 'never' ? 1 : this.config.request.maxConcurrentPosts;
-      if (this.config.request.maxConcurrentPosts > 1 && this.config.stopOn !== 'never') {
-        this.log('info', `Parallel post downloads skipped: stop condition "${this.config.stopOn}" requires serial processing`);
-      }
+      const maxConcurrentPosts = this.config.request.maxConcurrentPosts;
       this.log('info', `Process up to ${maxConcurrentPosts} posts concurrently`);
 
       // Step 2: download posts in each fetched list
