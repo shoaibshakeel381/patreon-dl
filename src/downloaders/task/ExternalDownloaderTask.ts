@@ -273,7 +273,8 @@ export default class ExternalDownloaderTask extends DownloadTask {
       'dest.dir': destDir
     };
 
-    const args = split(dl.exec);
+    // argv-split reuses its result array, so copy it before another task is parsed.
+    const args = [ ...split(dl.exec) ];
     const cmd = args.shift();
     if (!cmd) {
       __log('warn', 'Could not create task: no command specified');

@@ -1,5 +1,17 @@
 # Changelog
 
+3.10.1
+- Add filters to exclude posts by title regular expression, collection ID, or tag.
+- Add configurable post ordering and support concurrent post processing with stop conditions; posts already in progress may finish after a stop condition is met.
+- Expand parallel HLS downloads to additional segment formats.
+- Add a yt-dlp fallback script for failed embedded video downloads.
+- Improve download task creation and retry handling, including non-retryable failures.
+
+3.9.1
+- Support the `media.index` field in media filename patterns.
+- Handle conditional separators in filename patterns correctly.
+- Show retry timing in logs when download task creation fails.
+
 3.9.0
 - Fix "initial data not found" error for certain targets ([#134](https://github.com/patrickkfkan/patreon-dl/issues/134)).
 - Fix order of images in post content ([patreon-dl-gui#60](https://github.com/patrickkfkan/patreon-dl-gui/issues/60)).

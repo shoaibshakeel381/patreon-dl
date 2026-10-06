@@ -94,6 +94,15 @@ Defined in: [src/downloaders/DownloaderOptions.ts:26](https://github.com/patrick
 
 ***
 
+### postsTitleRegex?
+
+> `optional` **postsTitleRegex**: `string`
+
+Skip posts whose titles match this JavaScript regular expression. Full regex
+literals with flags (such as `/flower/i`) and plain pattern text are accepted.
+
+***
+
 ### postsPublished?
 
 > `optional` **postsPublished**: `object`

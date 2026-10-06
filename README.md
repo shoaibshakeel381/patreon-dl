@@ -9,6 +9,8 @@ This repo contains the `patreon-dl` library and its command-line tool. For GUI a
 ### Features
 - Access to patron-only content through cookie. This refers to content you have access to under your account. It does not include locked content that you don't have a subscription for.
 - Download posts by user, in a collection or single post.
+- Filter posts by title, collection, or tag, and choose their processing order.
+- Process multiple posts concurrently, including when a stop condition is configured.
 - Download products (aka shop purchases)
 - Items included in downloads:
     - videos - but see [limitations](#limitations) on Patreon-hosted videos
@@ -115,6 +117,7 @@ $ patreon-dl [OPTION]... URL
 | `--ffmpeg <path>` | `-f` | Path to FFmpeg executable |
 | `--deno <path>` | `-d` | Path to Deno executable |
 | `--out-dir <path>` |`-o` | Directory to save content |
+| `--max-concurrent-posts <number>` | | Maximum number of posts to process concurrently (default: 1). Applies when a stop condition is set too. |
 | `--log-level <level>` | `-l` | Log level of the console logger: `info`, `debug`, `warn` or `error`; set to `none` to disable the logger. |
 | `--no-prompt` | `-y` | Do not prompt for confirmation to proceed |
 | `--dry-run`   |      | Run without writing files to disk (except logs, if any). Intended for testing / debugging. |
@@ -123,6 +126,14 @@ $ patreon-dl [OPTION]... URL
 | <code><nobr>--list-posts &lt;creator&gt;</nobr></code> | | <p>List posts by the given creator(s). Separate multiple creators with a comma.</p> |
 | <code><nobr>--list-posts-uid &lt;user ID&gt;</nobr></code> | | Same as `--list-posts`, but takes user ID instead of vanity. |
 | `--configure-youtube` | | <p>Configure YouTube connection.</p>`patreon-dl` supports downloading embedded YouTube videos. If you have a YouTube Premium account, you can connect `patreon-dl` to it for downloading Premium-quality streams. You will also need to connect to an account if you get a "Login required" error message during download.|
+
+To download posts concurrently, use `--max-concurrent-posts 2`, set
+`max.concurrent.posts = 2` under `[request]` in the configuration file, or
+pass `{ request: { maxConcurrentPosts: 2 } }` to the library. The default is `1`.
+This setting also applies when `stop.on` is set. When a stop condition is met,
+no more posts are scheduled, but posts already in progress may finish and be
+downloaded. Each post uses its own `request.max.concurrent` limit; HLS videos
+retain their independent segment-download limits.
 
 ### URL
 
@@ -214,6 +225,9 @@ include.posts.in.tier = 123456, 789100
 #
 # include.locked.content
 # include.posts.with.media.type
+# include.posts.title.regex (skip posts whose titles match this regex)
+# include.posts.excluded.collection.ids (skip posts in any listed collection)
+# include.posts.excluded.tags (skip posts with any listed tag)
 # include.posts.published.after
 # include.posts.published.before
 # include.campaign.info
@@ -311,15 +325,14 @@ Note the URL shown in the output. Open this URL in a web browser to begin viewin
 
 ## Changelog
 
-3.9.0
-- Fix "initial data not found" error for certain targets ([#134](https://github.com/patrickkfkan/patreon-dl/issues/134)).
-- Fix order of images in post content ([patreon-dl-gui#60](https://github.com/patrickkfkan/patreon-dl-gui/issues/60)).
-- Support `media.index` field in `media.filename.format`.
-- Handle conditional separators properly in filename format patterns.
-- Browse: use slugified links.
+3.10.1
+- Add post title, collection, and tag exclusion filters and configurable post ordering.
+- Improve parallel HLS segment downloads and retry handling for download tasks and embedded videos.
+- Allow posts already in progress to finish when a stop condition is met during concurrent processing.
 - Minor bug fixes.
 
 See the [full changelog](./CHANGELOG.md) for older versions.
+
 
 ---
 This project is licensed under the MIT License and includes third-party software—see the [NOTICE](./NOTICE) file for attributions.

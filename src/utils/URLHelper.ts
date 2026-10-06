@@ -264,6 +264,7 @@ const SHOP_API_URL_SEARCH_PARAMS = {
 export enum PostSortOrder {
   PublisedAtDesc = '-published_at',
   PublishedAtAsc = 'published_at',
+  Popular = '-like_count',
   CollectionOrder = 'collection_order'
 }
 

@@ -20,6 +20,7 @@ const COMMAND_LINE_ARGS = {
   ffmpeg: 'ffmpeg',
   deno: 'deno',
   outDir: 'out-dir',
+  maxConcurrentPosts: 'max-concurrent-posts',
   logLevel: 'log-level',
   noPrompt: 'no-prompt',
   dryRun: 'dry-run',
@@ -31,6 +32,12 @@ const COMMAND_LINE_ARGS = {
 } as const;
 
 const OPT_DEFS = [
+  {
+    name: COMMAND_LINE_ARGS.maxConcurrentPosts,
+    description: 'Maximum concurrent posts (default: 1); posts already in progress may finish after a stop condition is met',
+    type: String,
+    typeLabel: '<number>'
+  },
   {
     name: COMMAND_LINE_ARGS.help,
     description: 'Display this usage guide',
@@ -216,6 +223,7 @@ export default class CommandLineParser {
       request: {
         maxRetries: undefined,
         maxConcurrent: undefined,
+        maxConcurrentPosts: __getValue(COMMAND_LINE_ARGS.maxConcurrentPosts),
         minTime: undefined,
         userAgent: undefined
       },
