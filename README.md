@@ -9,6 +9,8 @@ This repo contains the `patreon-dl` library and its command-line tool. For GUI a
 ### Features
 - Access to patron-only content through cookie. This refers to content you have access to under your account. It does not include locked content that you don't have a subscription for.
 - Download posts by user, in a collection or single post.
+- Filter posts by title, collection, or tag, and choose their processing order.
+- Process multiple posts concurrently, including when a stop condition is configured.
 - Download products (aka shop purchases)
 - Items included in downloads:
     - videos - but see [limitations](#limitations) on Patreon-hosted videos
@@ -323,15 +325,14 @@ Note the URL shown in the output. Open this URL in a web browser to begin viewin
 
 ## Changelog
 
-3.9.0
-- Fix "initial data not found" error for certain targets ([#134](https://github.com/patrickkfkan/patreon-dl/issues/134)).
-- Fix order of images in post content ([patreon-dl-gui#60](https://github.com/patrickkfkan/patreon-dl-gui/issues/60)).
-- Support `media.index` field in `media.filename.format`.
-- Handle conditional separators properly in filename format patterns.
-- Browse: use slugified links.
+3.10.1
+- Add post title, collection, and tag exclusion filters and configurable post ordering.
+- Improve parallel HLS segment downloads and retry handling for download tasks and embedded videos.
+- Allow posts already in progress to finish when a stop condition is met during concurrent processing.
 - Minor bug fixes.
 
 See the [full changelog](./CHANGELOG.md) for older versions.
+
 
 ---
 This project is licensed under the MIT License and includes third-party software—see the [NOTICE](./NOTICE) file for attributions.
