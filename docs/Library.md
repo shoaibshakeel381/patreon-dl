@@ -125,6 +125,11 @@ as `/flower/i`, or plain pattern text such as `flower`. Matching is performed
 anywhere in the title unless the expression uses anchors such as `^` or `$`.
 Leave it empty to include all titles.
 
+To skip posts that belong to any listed collection, set
+`include.postsExcludedCollectionIds` to an array of collection IDs. A post is
+skipped if it belongs to at least one of those collections. Leave the array
+empty to include posts from all collections.
+
 To obtain the IDs of tiers for a particular creator, first get the campaign through `PatreonDownloader.getCampaign()`, then inspect the `rewards` property:
 
 ```

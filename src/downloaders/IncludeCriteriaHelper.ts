@@ -35,6 +35,11 @@ export class IncludeCriteriaHelper {
     return !!postsTitleRegex && compilePostTitleRegex(postsTitleRegex).test(post.title || '');
   }
 
+  postBelongsToExcludedCollection(post: Post, config: DownloaderConfig<Post>) {
+    const excludedIds = config.include.postsExcludedCollectionIds;
+    return excludedIds.some((id) => post.collections?.some((collection) => collection.id === id) ?? false);
+  }
+
   checkPost(post: Post, config: DownloaderConfig<Post>): IncludeCriteriaCheckPostResult {
     // -- 1. Viewability
     if (!post.isViewable && !config.include.lockedContent) {

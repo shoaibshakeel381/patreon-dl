@@ -27,6 +27,7 @@ export interface DownloaderIncludeOptions {
   postsWithMediaType?: Array<'image' | 'video' | 'audio' | 'attachment' | 'podcast'> | 'any' | 'none';
   postsInTier?: Array<string> | 'any';
   postsTitleRegex?: string;
+  postsExcludedCollectionIds?: string[];
   postsPublished?: {
     after?: DateTime | null;
     before?: DateTime | null;
@@ -133,6 +134,7 @@ const DEFAULT_DOWNLOADER_INIT: DownloaderInit = {
     postsWithMediaType: 'any',
     postsInTier: 'any',
     postsTitleRegex: '',
+    postsExcludedCollectionIds: [],
     postsPublished: {
       after: null,
       before: null
@@ -183,6 +185,7 @@ export function getDownloaderInit(options?: DownloaderOptions): DownloaderInit {
     throw Error('maxConcurrentPosts must be a positive integer');
   }
   const postsTitleRegex = pickDefined(options?.include?.postsTitleRegex, defaults.include.postsTitleRegex);
+  const postsExcludedCollectionIds = pickDefined(options?.include?.postsExcludedCollectionIds, defaults.include.postsExcludedCollectionIds);
   if (postsTitleRegex) {
     try {
       compilePostTitleRegex(postsTitleRegex);
@@ -224,6 +227,7 @@ export function getDownloaderInit(options?: DownloaderOptions): DownloaderInit {
       postsWithMediaType: pickDefined(options?.include?.postsWithMediaType, defaults.include.postsWithMediaType),
       postsInTier: pickDefined(options?.include?.postsInTier, defaults.include.postsInTier),
       postsTitleRegex,
+      postsExcludedCollectionIds,
       postsPublished: {
         after: pickDefined(options?.include?.postsPublished?.after, defaults.include.postsPublished.after),
         before: pickDefined(options?.include?.postsPublished?.before, defaults.include.postsPublished.before)

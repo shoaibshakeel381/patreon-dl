@@ -164,6 +164,7 @@ function getCLIIncludeOptions(commandLineOptions: CommandLineParseResult, config
     postsWithMediaType: CLIOptionValidator.validateIncludeContentWithMediaType(pickDefined(commandLineOptions.include?.postsWithMediaType, configFileOptions?.include?.postsWithMediaType)),
     postsInTier: CLIOptionValidator.validateIncludeContentInTier(pickDefined(commandLineOptions.include?.postsInTier, configFileOptions?.include?.postsInTier)),
     postsTitleRegex: CLIOptionValidator.validateString(pickDefined(commandLineOptions.include?.postsTitleRegex, configFileOptions?.include?.postsTitleRegex)),
+    postsExcludedCollectionIds: (CLIOptionValidator.validateString(pickDefined(commandLineOptions.include?.postsExcludedCollectionIds, configFileOptions?.include?.postsExcludedCollectionIds)) || '').split(',').map((id) => id.trim()).filter(Boolean),
     postsSortOrder: CLIOptionValidator.validateString(pickDefined(commandLineOptions.include?.postsSortOrder, configFileOptions?.include?.postsSortOrder), 'newest', 'oldest', 'popular', 'collection'),
     postsPublished: {
       after: CLIOptionValidator.validateDateTime(pickDefined(commandLineOptions.include?.postsPublished?.after, configFileOptions?.include?.postsPublished?.after)) || null,
@@ -215,6 +216,7 @@ function readTargetsFile(file: string) {
     postsWithMediaType: 'include.posts.with.media.type',
     postsInTier: 'include.posts.in.tier',
     postsTitleRegex: 'include.posts.title.regex',
+    postsExcludedCollectionIds: 'include.posts.excluded.collection.ids',
     postsPublishedAfter: 'include.posts.published.after',
     postsPublishedBefore: 'include.posts.published.before',
     productsPublishedAfter: 'include.products.published.after',
