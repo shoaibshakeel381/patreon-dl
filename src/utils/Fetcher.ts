@@ -35,12 +35,14 @@ export class FetcherError extends Error {
 
   url: string;
   method: string;
+  statusCode?: number;
 
-  constructor(message: string, url: string, method: string) {
+  constructor(message: string, url: string, method: string, statusCode?: number) {
     super(message);
     this.name = 'FetcherError';
     this.url = url;
     this.method = method;
+    this.statusCode = statusCode;
   }
 }
 
@@ -370,7 +372,7 @@ export default class Fetcher {
       throw new FetcherError('No response', originURL, method);
     }
     if (!response.ok) {
-      throw new FetcherError(`${response.status} - ${response.statusText}`, originURL, method);
+      throw new FetcherError(`${response.status} - ${response.statusText}`, originURL, method, response.status);
     }
     if (requireBody && !response.body) {
       throw new FetcherError('Empty response body', originURL, method);
