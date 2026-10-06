@@ -137,6 +137,7 @@ export default class PostDownloader extends Downloader<Post> {
       let skippedPublishDateOutOfRange = 0;
       let skippedTitleMatchesRegex = 0;
       let skippedExcludedCollection = 0;
+      let skippedExcludedTag = 0;
       let campaignSaved = false;
       let stopConditionMet = false;
       const collectionSaves = new Map<string, Promise<void>>();
@@ -156,38 +157,11 @@ export default class PostDownloader extends Downloader<Post> {
         }
         if (!list) break;
 
-        // Remove title matches before creating post workers, so they do not
-        // trigger per-post collection handling, refresh requests, or downloads.
+        // Remove already-seen posts before creating post workers.
         const postsToProcess: Post[] = [];
         for (const post of list.items) {
           if (seenPostIds.has(post.id)) {
             this.log('debug', `Post #${post.id} already scheduled`);
-            continue;
-          }
-          if (includeCriteriaHelper.postTitleMatchesRegex(post, this.config)) {
-            seenPostIds.add(post.id);
-            this.log('info', `Skipped downloading post #${post.id}: title matches include.posts.title.regex`);
-            this.emit('targetBegin', { target: post });
-            this.emit('targetEnd', {
-              target: post,
-              isSkipped: true,
-              skipReason: TargetSkipReason.TitleMatchesRegex,
-              skipMessage: 'Post title matches regex'
-            });
-            skippedTitleMatchesRegex++;
-            continue;
-          }
-          if (includeCriteriaHelper.postBelongsToExcludedCollection(post, this.config)) {
-            seenPostIds.add(post.id);
-            this.log('info', `Skipped downloading post #${post.id}: belongs to an excluded collection`);
-            this.emit('targetBegin', { target: post });
-            this.emit('targetEnd', {
-              target: post,
-              isSkipped: true,
-              skipReason: TargetSkipReason.InExcludedCollection,
-              skipMessage: 'Post belongs to an excluded collection'
-            });
-            skippedExcludedCollection++;
             continue;
           }
           postsToProcess.push(post);
@@ -284,6 +258,42 @@ export default class PostDownloader extends Downloader<Post> {
               ) {
                 stopConditionMet = true;
               }
+              return;
+            }
+
+            if (includeCriteriaHelper.postTitleMatchesRegex(post, this.config)) {
+              this.log('info', `Skipped downloading post #${post.id}: title matches include.posts.title.regex`);
+              this.emit('targetEnd', {
+                target: post,
+                isSkipped: true,
+                skipReason: TargetSkipReason.TitleMatchesRegex,
+                skipMessage: 'Post title matches regex'
+              });
+              skippedTitleMatchesRegex++;
+              return;
+            }
+
+            if (includeCriteriaHelper.postBelongsToExcludedCollection(post, this.config)) {
+              this.log('info', `Skipped downloading post #${post.id}: belongs to an excluded collection`);
+              this.emit('targetEnd', {
+                target: post,
+                isSkipped: true,
+                skipReason: TargetSkipReason.InExcludedCollection,
+                skipMessage: 'Post belongs to an excluded collection'
+              });
+              skippedExcludedCollection++;
+              return;
+            }
+
+            if (includeCriteriaHelper.postHasExcludedTag(post, this.config)) {
+              this.log('info', `Skipped downloading post #${post.id}: has an excluded tag`);
+              this.emit('targetEnd', {
+                target: post,
+                isSkipped: true,
+                skipReason: TargetSkipReason.HasExcludedTag,
+                skipMessage: 'Post has an excluded tag'
+              });
+              skippedExcludedTag++;
               return;
             }
 
@@ -414,6 +424,9 @@ export default class PostDownloader extends Downloader<Post> {
         }
         if (skippedExcludedCollection) {
           skippedStrParts.push(`${skippedExcludedCollection} in excluded collections`);
+        }
+        if (skippedExcludedTag) {
+          skippedStrParts.push(`${skippedExcludedTag} with excluded tags`);
         }
         const skippedStr = skippedStrParts.length > 0 ? ` (skipped: ${skippedStrParts.join(', ')})` : '';
         endMessage = `Total ${downloaded} / ${postsFetcher.getTotal()} posts processed${skippedStr}`;

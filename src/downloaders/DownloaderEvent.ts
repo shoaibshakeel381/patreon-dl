@@ -19,7 +19,8 @@ export enum TargetSkipReason {
   NotInTier = 3,
   PublishDateOutOfRange = 4,
   TitleMatchesRegex = 5,
-  InExcludedCollection = 6
+  InExcludedCollection = 6,
+  HasExcludedTag = 7
 }
 
 export interface DownloaderEventPayload {

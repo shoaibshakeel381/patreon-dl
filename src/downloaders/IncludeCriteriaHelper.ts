@@ -40,6 +40,15 @@ export class IncludeCriteriaHelper {
     return excludedIds.some((id) => post.collections?.some((collection) => collection.id === id) ?? false);
   }
 
+  postHasExcludedTag(post: Post, config: DownloaderConfig<Post>) {
+    const excludedTags = config.include.postsExcludedTags;
+    return excludedTags.some((excludedTag) => post.tags?.some((tag) => {
+      const separator = tag.value.indexOf(';');
+      const value = separator < 0 ? tag.value : tag.value.slice(separator + 1);
+      return value.trim() === excludedTag;
+    }) ?? false);
+  }
+
   checkPost(post: Post, config: DownloaderConfig<Post>): IncludeCriteriaCheckPostResult {
     // -- 1. Viewability
     if (!post.isViewable && !config.include.lockedContent) {

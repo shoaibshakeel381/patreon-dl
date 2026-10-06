@@ -31,6 +31,7 @@ const CONFIG_FILE_PROPS = {
     postsInTier: 'include:posts.in.tier',
     postsTitleRegex: 'include:posts.title.regex',
     postsExcludedCollectionIds: 'include:posts.excluded.collection.ids',
+    postsExcludedTags: 'include:posts.excluded.tags',
     postsSortOrder: 'include:posts.sort.order',
     postsPublishedAfter: 'include:posts.published.after',
     postsPublishedBefore: 'include:posts.published.before',
@@ -128,6 +129,7 @@ export default class ConfigFileParser {
         postsInTier: __getValue(CONFIG_FILE_PROPS.include.postsInTier),
         postsTitleRegex: __getValue(CONFIG_FILE_PROPS.include.postsTitleRegex),
         postsExcludedCollectionIds: __getValue(CONFIG_FILE_PROPS.include.postsExcludedCollectionIds),
+        postsExcludedTags: __getValue(CONFIG_FILE_PROPS.include.postsExcludedTags),
         postsSortOrder: __getValue(CONFIG_FILE_PROPS.include.postsSortOrder),
         postsPublished: {
           after: __getValue(CONFIG_FILE_PROPS.include.postsPublishedAfter),

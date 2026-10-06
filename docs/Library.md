@@ -130,6 +130,11 @@ To skip posts that belong to any listed collection, set
 skipped if it belongs to at least one of those collections. Leave the array
 empty to include posts from all collections.
 
+To skip posts with any listed tag, set `include.postsExcludedTags` to an array
+of tag values. User-defined tag IDs such as `user_defined;Farming Life` are
+matched by the value after the semicolon (`Farming Life`); surrounding spaces
+are trimmed. A post is skipped if it has at least one listed tag.
+
 To obtain the IDs of tiers for a particular creator, first get the campaign through `PatreonDownloader.getCampaign()`, then inspect the `rewards` property:
 
 ```

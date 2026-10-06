@@ -28,6 +28,7 @@ export interface DownloaderIncludeOptions {
   postsInTier?: Array<string> | 'any';
   postsTitleRegex?: string;
   postsExcludedCollectionIds?: string[];
+  postsExcludedTags?: string[];
   postsPublished?: {
     after?: DateTime | null;
     before?: DateTime | null;
@@ -135,6 +136,7 @@ const DEFAULT_DOWNLOADER_INIT: DownloaderInit = {
     postsInTier: 'any',
     postsTitleRegex: '',
     postsExcludedCollectionIds: [],
+    postsExcludedTags: [],
     postsPublished: {
       after: null,
       before: null
@@ -186,6 +188,7 @@ export function getDownloaderInit(options?: DownloaderOptions): DownloaderInit {
   }
   const postsTitleRegex = pickDefined(options?.include?.postsTitleRegex, defaults.include.postsTitleRegex);
   const postsExcludedCollectionIds = pickDefined(options?.include?.postsExcludedCollectionIds, defaults.include.postsExcludedCollectionIds);
+  const postsExcludedTags = pickDefined(options?.include?.postsExcludedTags, defaults.include.postsExcludedTags);
   if (postsTitleRegex) {
     try {
       compilePostTitleRegex(postsTitleRegex);
@@ -228,6 +231,7 @@ export function getDownloaderInit(options?: DownloaderOptions): DownloaderInit {
       postsInTier: pickDefined(options?.include?.postsInTier, defaults.include.postsInTier),
       postsTitleRegex,
       postsExcludedCollectionIds,
+      postsExcludedTags,
       postsPublished: {
         after: pickDefined(options?.include?.postsPublished?.after, defaults.include.postsPublished.after),
         before: pickDefined(options?.include?.postsPublished?.before, defaults.include.postsPublished.before)
