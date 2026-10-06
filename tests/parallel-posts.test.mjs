@@ -95,25 +95,24 @@ test('one worker remains serial and duplicate IDs are processed once', async (t)
 });
 
 for (const stopOn of ['previouslyDownloaded', 'postPreviouslyDownloaded', 'publishDateOutOfRange', 'postPublishDateOutOfRange']) {
-  test('stop condition ' + stopOn + ' forces serial processing', async (t) => {
+  test('stop condition ' + stopOn + ' allows configured post concurrency', async (t) => {
     const run = await setup(t, { maxConcurrentPosts: 3, stopOn });
     await run.instance.doStart();
-    assert.equal(run.peak(), 1);
-    assert.ok(run.logs.some((e) => e.message.join(' ').includes('requires serial processing')));
+    assert.equal(run.peak(), 3);
     if (stopOn.includes('Downloaded')) {
       const rerun = await setup(t, { maxConcurrentPosts: 3, stopOn, outDir: run.root });
       await rerun.instance.doStart();
       assert.deepEqual(rerun.saved, []);
-      assert.equal(rerun.timeline.filter((s) => s.startsWith('begin:')).length, 1);
+      assert.ok(rerun.timeline.filter((s) => s.startsWith('begin:')).length > 1);
     }
   });
 }
 
-test('publish-date stop prevents later posts from being scheduled', async (t) => {
+test('publish-date stop allows already scheduled concurrent posts to finish', async (t) => {
   const run = await setup(t, { maxConcurrentPosts: 3, stopOn: 'publishDateOutOfRange',
     include: { postsPublished: { after: DateTime.from('2025-01-01') } } });
   await run.instance.doStart();
-  assert.equal(run.timeline.filter((s) => s.startsWith('begin:')).length, 1);
+  assert.equal(run.timeline.filter((s) => s.startsWith('begin:')).length, 3);
   assert.deepEqual(run.saved, []);
 });
 

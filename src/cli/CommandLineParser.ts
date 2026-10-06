@@ -34,7 +34,7 @@ const COMMAND_LINE_ARGS = {
 const OPT_DEFS = [
   {
     name: COMMAND_LINE_ARGS.maxConcurrentPosts,
-    description: 'Maximum concurrent posts (default: 1); stop conditions force serial downloads',
+    description: 'Maximum concurrent posts (default: 1); posts already in progress may finish after a stop condition is met',
     type: String,
     typeLabel: '<number>'
   },
