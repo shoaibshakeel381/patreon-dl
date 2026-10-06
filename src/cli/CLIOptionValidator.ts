@@ -82,6 +82,15 @@ export default class CLIOptionValidator {
     return sanitized;
   }
 
+  static validatePositiveInteger(entry?: CLIOptionParserEntry) {
+    if (!entry) return undefined;
+    const value = Number(entry.value);
+    if (!Number.isSafeInteger(value) || value < 1) {
+      throw Error(`${this.#logEntryKey(entry)} must be a positive integer`);
+    }
+    return value;
+  }
+
   static validateStringArray<T>(entry: CLIOptionParserEntry | undefined, match?: readonly T[], delimiter = ',') {
     const value = entry?.value || undefined;
     if (!entry || !value) {

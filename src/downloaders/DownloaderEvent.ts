@@ -17,7 +17,10 @@ export enum TargetSkipReason {
   AlreadyDownloaded = 1,
   UnmetMediaTypeCriteria = 2,
   NotInTier = 3,
-  PublishDateOutOfRange = 4
+  PublishDateOutOfRange = 4,
+  TitleMatchesRegex = 5,
+  InExcludedCollection = 6,
+  HasExcludedTag = 7
 }
 
 export interface DownloaderEventPayload {

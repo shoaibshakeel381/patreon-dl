@@ -109,7 +109,7 @@ export default class PostsFetcher extends EventEmitter {
   }
 
   begin() {
-    void this.#doBegin();
+    return this.#doBegin().catch((error: unknown) => this.#handleError(error));
   }
 
   async #doBegin() {
@@ -258,8 +258,20 @@ export default class PostsFetcher extends EventEmitter {
       const pageURL = this.#getInitialDataPageURL();
       const { campaignId, currentUserId } = await this.getInitialData(pageURL);
       let sort: PostSortOrder | undefined;
-      if (postFetch.type === 'byCollection') {
-        sort = PostSortOrder.CollectionOrder;
+      switch (this.config.include.postsSortOrder) {
+        case 'collection':
+          sort = postFetch.type === 'byCollection'
+            ? PostSortOrder.CollectionOrder
+            : PostSortOrder.PublisedAtDesc;
+          break;
+        case 'oldest':
+          sort = PostSortOrder.PublishedAtAsc;
+          break;
+        case 'popular':
+          sort = PostSortOrder.Popular;
+          break;
+        default:
+          sort = PostSortOrder.PublisedAtDesc;
       }
 
       return URLHelper.constructPostsAPIURL({

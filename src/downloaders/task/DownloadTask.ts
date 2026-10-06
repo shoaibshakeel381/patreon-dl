@@ -23,6 +23,14 @@ export class DownloadTaskError extends Error {
   }
 }
 
+function isHttp404(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+  const candidate = error as { statusCode?: unknown; cause?: unknown };
+  return candidate.statusCode === 404 || isHttp404(candidate.cause);
+}
+
 export type DownloadTaskSkipReason = {
   message: string;
 } & ({
@@ -175,10 +183,20 @@ export default abstract class DownloadTask<T extends Downloadable = Downloadable
           if (signal?.aborted) {
             throw error;
           }
-          const willRetry = t < maxRetries ? `will retry in ${1000 * t}ms` : 'max reached';
+          const isUnavailableYouTubeEmbed = task.srcEntity.type === 'videoEmbed' &&
+            task.srcEntity.provider?.toLowerCase() === 'youtube' &&
+            (error instanceof Error ? error.message : String(error)).toLowerCase().includes('unavailable');
+          const isNotFound = isHttp404(error);
+          const willRetry = isUnavailableYouTubeEmbed ? 'not retrying (YouTube video unavailable)' :
+            isNotFound ? 'not retrying (HTTP 404 Not Found)' :
+            t < maxRetries ? `will retry in ${1000 * t}ms` : 'max reached';
           const retryStr = t > 0 ? `retried ${t} times - ${willRetry}`: willRetry;
-          task.log('error', `(Task create #${task.srcEntity.id}) Error resolving dest path (${retryStr}):`, error);
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          task.log('debug', `(Task create #${task.srcEntity.id}) Destination path resolution failed (${retryStr}): ${errorMessage}`);
           err = error;
+          if (isUnavailableYouTubeEmbed || isNotFound) {
+            break;
+          }
           t++;
           if (t < maxRetries + 1) {
             const sleeper = Sleeper.getInstance(1000 * t, signal);
@@ -315,7 +333,7 @@ export default abstract class DownloadTask<T extends Downloadable = Downloadable
     this.#notifyEnd('skipped', reason);
   }
 
-  protected notifyError(error: any, allowRetry = true) {
+  protected notifyError(error: any, allowRetry = !isHttp404(error)) {
     const msg = error instanceof Error ? error.message : error;
     const err = new DownloadTaskError(msg, this);
     if (error instanceof Error) {

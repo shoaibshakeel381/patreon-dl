@@ -64,7 +64,7 @@ export async function listPosts(options: {
           
           console.log(`*** Posts by ${target} ***${EOL}`);
           
-          postsFetcher.begin();
+          void postsFetcher.begin();
           let breakWhile = false;
           while (postsFetcher.hasNext()) {
             const { list, aborted, error } = await postsFetcher.next();

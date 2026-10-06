@@ -115,6 +115,7 @@ $ patreon-dl [OPTION]... URL
 | `--ffmpeg <path>` | `-f` | Path to FFmpeg executable |
 | `--deno <path>` | `-d` | Path to Deno executable |
 | `--out-dir <path>` |`-o` | Directory to save content |
+| `--max-concurrent-posts <number>` | | Post processing concurrency (default: 1). Stop conditions force serial processing. |
 | `--log-level <level>` | `-l` | Log level of the console logger: `info`, `debug`, `warn` or `error`; set to `none` to disable the logger. |
 | `--no-prompt` | `-y` | Do not prompt for confirmation to proceed |
 | `--dry-run`   |      | Run without writing files to disk (except logs, if any). Intended for testing / debugging. |
@@ -123,6 +124,13 @@ $ patreon-dl [OPTION]... URL
 | <code><nobr>--list-posts &lt;creator&gt;</nobr></code> | | <p>List posts by the given creator(s). Separate multiple creators with a comma.</p> |
 | <code><nobr>--list-posts-uid &lt;user ID&gt;</nobr></code> | | Same as `--list-posts`, but takes user ID instead of vanity. |
 | `--configure-youtube` | | <p>Configure YouTube connection.</p>`patreon-dl` supports downloading embedded YouTube videos. If you have a YouTube Premium account, you can connect `patreon-dl` to it for downloading Premium-quality streams. You will also need to connect to an account if you get a "Login required" error message during download.|
+
+To download posts concurrently, use `--max-concurrent-posts 2`, set
+`max.concurrent.posts = 2` under `[request]` in the configuration file, or
+pass `{ request: { maxConcurrentPosts: 2 } }` to the library. The default is `1`.
+Any `stop.on` condition other than `never` forces serial post processing and
+logs the reason. Each post uses its own `request.max.concurrent` limit;
+HLS videos retain their independent segment-download limits.
 
 ### URL
 
@@ -214,6 +222,9 @@ include.posts.in.tier = 123456, 789100
 #
 # include.locked.content
 # include.posts.with.media.type
+# include.posts.title.regex (skip posts whose titles match this regex)
+# include.posts.excluded.collection.ids (skip posts in any listed collection)
+# include.posts.excluded.tags (skip posts with any listed tag)
 # include.posts.published.after
 # include.posts.published.before
 # include.campaign.info

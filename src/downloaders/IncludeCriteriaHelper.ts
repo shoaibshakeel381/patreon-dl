@@ -4,6 +4,7 @@ import { type LogLevel } from "../utils/logging/Logger.js";
 import type Logger from "../utils/logging/Logger.js";
 import { commonLog } from "../utils/logging/Logger.js";
 import { type DownloaderConfig } from "./Downloader.js";
+import { compilePostTitleRegex } from "./PostTitleRegex.js";
 
 export type IncludeCriteriaCheckPostResult = {
   ok: true;
@@ -27,6 +28,25 @@ export class IncludeCriteriaHelper {
 
   constructor(logger?: Logger | null) {
     this.logger = logger;
+  }
+
+  postTitleMatchesRegex(post: Post, config: DownloaderConfig<Post>) {
+    const postsTitleRegex = config.include.postsTitleRegex;
+    return !!postsTitleRegex && compilePostTitleRegex(postsTitleRegex).test(post.title || '');
+  }
+
+  postBelongsToExcludedCollection(post: Post, config: DownloaderConfig<Post>) {
+    const excludedIds = config.include.postsExcludedCollectionIds;
+    return excludedIds.some((id) => post.collections?.some((collection) => collection.id === id) ?? false);
+  }
+
+  postHasExcludedTag(post: Post, config: DownloaderConfig<Post>) {
+    const excludedTags = config.include.postsExcludedTags;
+    return excludedTags.some((excludedTag) => post.tags?.some((tag) => {
+      const separator = tag.value.indexOf(';');
+      const value = separator < 0 ? tag.value : tag.value.slice(separator + 1);
+      return value.trim() === excludedTag;
+    }) ?? false);
   }
 
   checkPost(post: Post, config: DownloaderConfig<Post>): IncludeCriteriaCheckPostResult {

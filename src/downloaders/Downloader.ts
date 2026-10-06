@@ -55,6 +55,28 @@ interface CreateDownloadTaskParams<T extends DownloaderType> {
   ignoreCreateTaskErrors?: boolean;
 }
 
+interface FailedDownloadTaskCreation {
+  error: unknown;
+  itemIds: string[];
+  targetNames: Set<string>;
+}
+
+function getDownloadTaskCreationErrorKey(error: unknown): string {
+  if (error && typeof error === 'object') {
+    const candidate = error as { statusCode?: unknown; url?: unknown; method?: unknown; cause?: unknown; message?: unknown };
+    if (candidate.statusCode === 404) {
+      return `404:${String(candidate.method)}:${String(candidate.url)}`;
+    }
+    if (candidate.cause) {
+      return getDownloadTaskCreationErrorKey(candidate.cause);
+    }
+    if (candidate.message) {
+      return `${error.constructor.name}:${String(candidate.message)}`;
+    }
+  }
+  return String(error);
+}
+
 export default abstract class Downloader<T extends DownloaderType> extends EventEmitter {
 
   abstract name: string;
@@ -144,7 +166,7 @@ export default abstract class Downloader<T extends DownloaderType> extends Event
     });
 
     batch.on('taskSkip', ({task, reason}) => {
-      this.log('warn', `Download skipped (${__getDownloadIdString(task, batch)}): ${reason.message}`);
+      this.log('info', `Download skipped (${__getDownloadIdString(task, batch)}): ${reason.message}`);
     });
 
     batch.on('taskSpawn', ({origin, spawn}) => {
@@ -195,6 +217,18 @@ export default abstract class Downloader<T extends DownloaderType> extends Event
     ...createTasks: Array<CreateDownloadTaskParams<T> | null>
   ) {
     let failedCreateTaskCount = 0;
+    const failedTaskCreations = new Map<string, FailedDownloadTaskCreation>();
+    const recordFailure = (error: unknown, itemId: string, targetName: string) => {
+      const key = getDownloadTaskCreationErrorKey(error);
+      let failure = failedTaskCreations.get(key);
+      if (!failure) {
+        failure = { error, itemIds: [], targetNames: new Set() };
+        failedTaskCreations.set(key, failure);
+      }
+      failure.itemIds.push(itemId);
+      failure.targetNames.add(targetName);
+      failedCreateTaskCount++;
+    };
     for (const task of createTasks) {
       if (!task) {
         continue;
@@ -228,8 +262,7 @@ export default abstract class Downloader<T extends DownloaderType> extends Event
           // Filter out tasks that are DOA (errors that occurred in DownloadTask.create())
           for (const task of tasks) {
             if (task.doa) {
-              this.log('error', `Failed to create download task for item #${tt.id} in ${targetName}:`, task.doa.msg, task.doa.cause);
-              failedCreateTaskCount++;
+              recordFailure(task.doa.cause || task.doa.msg, tt.id, targetName);
             }
           }
           const createdTasks = tasks.filter((task) => !task.doa);
@@ -248,8 +281,7 @@ export default abstract class Downloader<T extends DownloaderType> extends Event
             return { batch, errorCount: failedCreateTaskCount };
           }
           if (!task.ignoreCreateTaskErrors) {
-            this.log('error', `Failed to create download task(s) for item #${tt.id} in ${targetName}:`, error);
-            failedCreateTaskCount++;
+            recordFailure(error, tt.id, targetName);
           }
         }
       }
@@ -257,8 +289,14 @@ export default abstract class Downloader<T extends DownloaderType> extends Event
         this.fsHelper.createDir(dir);
       }
     }
+    for (const failure of failedTaskCreations.values()) {
+      const targets = [...failure.targetNames].join('; ');
+      const itemIds = [...new Set(failure.itemIds)].map((id) => `#${id}`).join(', ');
+      const duplicateCount = failure.itemIds.length > 1 ? ` (${failure.itemIds.length} occurrences)` : '';
+      this.log('error', `Could not create download task for ${itemIds}${duplicateCount} in ${targets}:`, failure.error);
+    }
     if (failedCreateTaskCount > 0) {
-      this.log('warn', `${failedCreateTaskCount} items could not be processed for downloading`);
+      this.log('warn', `${failedCreateTaskCount} items could not be processed across ${failedTaskCreations.size} distinct error(s)`);
     }
     return { batch, errorCount: failedCreateTaskCount };
   }
@@ -552,7 +590,7 @@ export default abstract class Downloader<T extends DownloaderType> extends Event
         this.log('info', `Saved ${targetName} to "${result.filePath}"`);
         break;
       case 'skipped':
-        this.log('warn', `Skipped saving ${targetName} #${target.id}: ${result.message}`);
+        this.log(result.message.startsWith('Destination file exists') ? 'info' : 'warn', `Skipped saving ${targetName} #${target.id}: ${result.message}`);
         break;
       case 'error':
         this.log('error', `Error saving ${targetName} #${target.id} to "${result.filePath}":`, result.error);

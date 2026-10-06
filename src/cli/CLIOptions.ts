@@ -87,6 +87,7 @@ export function getCLIOptions(skipTargetURLs = false): CLIOptions | Omit<CLIOpti
     request: {
       maxRetries: CLIOptionValidator.validateNumber(pickDefined(commandLineOptions?.request?.maxRetries, configFileOptions?.request?.maxRetries)),
       maxConcurrent: CLIOptionValidator.validateNumber(pickDefined(commandLineOptions?.request?.maxConcurrent, configFileOptions?.request?.maxConcurrent)),
+      maxConcurrentPosts: CLIOptionValidator.validatePositiveInteger(pickDefined(commandLineOptions?.request?.maxConcurrentPosts, configFileOptions?.request?.maxConcurrentPosts)),
       minTime: CLIOptionValidator.validateNumber(pickDefined(commandLineOptions?.request?.minTime, configFileOptions?.request?.minTime)),
       proxy,
       userAgent: CLIOptionValidator.validateString(pickDefined(commandLineOptions?.request?.userAgent, configFileOptions?.request?.userAgent))
@@ -162,6 +163,10 @@ function getCLIIncludeOptions(commandLineOptions: CommandLineParseResult, config
     lockedContent: CLIOptionValidator.validateBoolean(pickDefined(commandLineOptions.include?.lockedContent, configFileOptions?.include?.lockedContent)),
     postsWithMediaType: CLIOptionValidator.validateIncludeContentWithMediaType(pickDefined(commandLineOptions.include?.postsWithMediaType, configFileOptions?.include?.postsWithMediaType)),
     postsInTier: CLIOptionValidator.validateIncludeContentInTier(pickDefined(commandLineOptions.include?.postsInTier, configFileOptions?.include?.postsInTier)),
+    postsTitleRegex: CLIOptionValidator.validateString(pickDefined(commandLineOptions.include?.postsTitleRegex, configFileOptions?.include?.postsTitleRegex)),
+    postsExcludedCollectionIds: (CLIOptionValidator.validateString(pickDefined(commandLineOptions.include?.postsExcludedCollectionIds, configFileOptions?.include?.postsExcludedCollectionIds)) || '').split(',').map((id) => id.trim()).filter(Boolean),
+    postsExcludedTags: (CLIOptionValidator.validateString(pickDefined(commandLineOptions.include?.postsExcludedTags, configFileOptions?.include?.postsExcludedTags)) || '').split(',').map((tag) => tag.trim()).filter(Boolean),
+    postsSortOrder: CLIOptionValidator.validateString(pickDefined(commandLineOptions.include?.postsSortOrder, configFileOptions?.include?.postsSortOrder), 'newest', 'oldest', 'popular', 'collection'),
     postsPublished: {
       after: CLIOptionValidator.validateDateTime(pickDefined(commandLineOptions.include?.postsPublished?.after, configFileOptions?.include?.postsPublished?.after)) || null,
       before: CLIOptionValidator.validateDateTime(pickDefined(commandLineOptions.include?.postsPublished?.before, configFileOptions?.include?.postsPublished?.before)) || null,
@@ -211,6 +216,9 @@ function readTargetsFile(file: string) {
     lockedContent: 'include.locked.content',
     postsWithMediaType: 'include.posts.with.media.type',
     postsInTier: 'include.posts.in.tier',
+    postsTitleRegex: 'include.posts.title.regex',
+    postsExcludedCollectionIds: 'include.posts.excluded.collection.ids',
+    postsExcludedTags: 'include.posts.excluded.tags',
     postsPublishedAfter: 'include.posts.published.after',
     postsPublishedBefore: 'include.posts.published.before',
     productsPublishedAfter: 'include.products.published.after',

@@ -22,6 +22,16 @@ export interface FFmpegCommandParams {
   noProxy?: boolean;
 }
 
+export interface FFmpegCommandPrepareContext {
+  destFilePath: string;
+  tmpFilePath: string;
+  signal?: AbortSignal;
+}
+
+export interface PreparedFFmpegCommandParams extends FFmpegCommandParams {
+  cleanup?: () => void;
+}
+
 // https://github.com/fluent-ffmpeg/node-fluent-ffmpeg
 export interface FFmpegProgress {
   frames: number; // Total processed frame count
@@ -58,6 +68,13 @@ export default abstract class FFmpegDownloadTaskBase<T extends Downloadable> ext
   protected abstract getFFmpegCommandParams(signal?: AbortSignal): Promise<FFmpegCommandParams>;
   protected abstract getTargetDuration(): number | null;
 
+  protected prepareFFmpegCommandParams(
+    params: FFmpegCommandParams,
+    _context: FFmpegCommandPrepareContext
+  ): PreparedFFmpegCommandParams | Promise<PreparedFFmpegCommandParams> {
+    return params;
+  }
+
   protected doStart() {
     return new Promise<void>((resolve) => {
       void (async () => {
@@ -67,35 +84,53 @@ export default abstract class FFmpegDownloadTaskBase<T extends Downloadable> ext
         }
   
         let tmpFilePath: string | null = null;
+        let cleanupPreparedInput: (() => void) | null = null;
         const __cleanup = () => {
           if (tmpFilePath && (this.dryRun || fs.existsSync(tmpFilePath))) {
             this.log('debug', `Clean up ${tmpFilePath}`);
             this.fsHelper.unlink(tmpFilePath);
           }
+          if (cleanupPreparedInput) {
+            try {
+              cleanupPreparedInput();
+            }
+            catch (error) {
+              this.log('error', 'Error cleaning up prepared FFmpeg input:', error);
+            }
+            finally {
+              cleanupPreparedInput = null;
+            }
+          }
+        };
+        const finishAbort = () => {
+          __cleanup();
+          this.#abortingCallback?.();
+          resolve();
         };
   
         try {
-          this.#abortController = new AbortController();
-          this.#abortController.signal.onabort = () => {
+          const abortController = this.#abortController = new AbortController();
+          abortController.signal.onabort = () => {
             if (this.#ffmpegCommand) {
               this.#ffmpegCommand.kill('SIGKILL');
             }
-            else if (this.#abortingCallback) {
-              this.#abortingCallback();
-              __cleanup();
-              resolve();
-            }
+            // Input preparation must settle its workers before temporary files are removed.
           };
   
           let ffmpegCommandParams;
           try {
-            ffmpegCommandParams = await this.getFFmpegCommandParams(this.#abortController.signal);
+            ffmpegCommandParams = await this.getFFmpegCommandParams(abortController.signal);
           }
           catch (error) {
-            if (this.#abortController.signal.aborted) {
+            if (abortController.signal.aborted) {
+              finishAbort();
               return;
             }
             throw error;
+          }
+          if (this.hasEnded()) {
+            resolve();
+            return;
           }
   
           const destFilePath = ffmpegCommandParams.output;
@@ -120,14 +155,35 @@ export default abstract class FFmpegDownloadTaskBase<T extends Downloadable> ext
   
           const _destFilePath = this.resolvedDestPath;
           const _tmpFilePath = tmpFilePath = FSHelper.createTmpFilePath(_destFilePath, this.srcEntity.id);
-  
+
           let hasError = false;
+
+          let preparedFFmpegCommandParams: PreparedFFmpegCommandParams;
+          this.notifyStart();
+          try {
+            preparedFFmpegCommandParams = await this.prepareFFmpegCommandParams(ffmpegCommandParams, {
+              destFilePath: _destFilePath,
+              tmpFilePath: _tmpFilePath,
+              signal: abortController.signal
+            });
+            cleanupPreparedInput = preparedFFmpegCommandParams.cleanup || null;
+          }
+          catch (error) {
+            if (abortController.signal.aborted) {
+              finishAbort();
+              return;
+            }
+            throw error;
+          }
+          if (abortController.signal.aborted) {
+            finishAbort();
+            return;
+          }
   
-          this.#ffmpegCommand = this.#constructFFmpegCommand(_tmpFilePath, ffmpegCommandParams);
+          this.#ffmpegCommand = this.#constructFFmpegCommand(_tmpFilePath, preparedFFmpegCommandParams);
 
           this.#ffmpegCommand.on('start', (commandLine: string) => {
             this.#commandLine = commandLine;
-            this.notifyStart();
           });
   
           this.#ffmpegCommand.on('progress', (progress: FFmpegProgress) => {

@@ -29,6 +29,10 @@ const CONFIG_FILE_PROPS = {
     lockedContent: 'include:locked.content',
     postsWithMediaType: 'include:posts.with.media.type',
     postsInTier: 'include:posts.in.tier',
+    postsTitleRegex: 'include:posts.title.regex',
+    postsExcludedCollectionIds: 'include:posts.excluded.collection.ids',
+    postsExcludedTags: 'include:posts.excluded.tags',
+    postsSortOrder: 'include:posts.sort.order',
     postsPublishedAfter: 'include:posts.published.after',
     postsPublishedBefore: 'include:posts.published.before',
     productsPublishedAfter: 'include:products.published.after',
@@ -48,6 +52,7 @@ const CONFIG_FILE_PROPS = {
   request: {
     maxRetries: 'request:max.retries',
     maxConcurrent: 'request:max.concurrent',
+    maxConcurrentPosts: 'request:max.concurrent.posts',
     minTime: 'request:min.time',
     proxy: {
       url: 'request:proxy.url',
@@ -122,6 +127,10 @@ export default class ConfigFileParser {
         lockedContent: __getValue(CONFIG_FILE_PROPS.include.lockedContent),
         postsWithMediaType: __getValue(CONFIG_FILE_PROPS.include.postsWithMediaType),
         postsInTier: __getValue(CONFIG_FILE_PROPS.include.postsInTier),
+        postsTitleRegex: __getValue(CONFIG_FILE_PROPS.include.postsTitleRegex),
+        postsExcludedCollectionIds: __getValue(CONFIG_FILE_PROPS.include.postsExcludedCollectionIds),
+        postsExcludedTags: __getValue(CONFIG_FILE_PROPS.include.postsExcludedTags),
+        postsSortOrder: __getValue(CONFIG_FILE_PROPS.include.postsSortOrder),
         postsPublished: {
           after: __getValue(CONFIG_FILE_PROPS.include.postsPublishedAfter),
           before: __getValue(CONFIG_FILE_PROPS.include.postsPublishedBefore),
@@ -147,6 +156,7 @@ export default class ConfigFileParser {
       request: {
         maxRetries: __getValue(CONFIG_FILE_PROPS.request.maxRetries),
         maxConcurrent: __getValue(CONFIG_FILE_PROPS.request.maxConcurrent),
+        maxConcurrentPosts: __getValue(CONFIG_FILE_PROPS.request.maxConcurrentPosts),
         minTime: __getValue(CONFIG_FILE_PROPS.request.minTime),
         proxy: {
           url: __getValue(CONFIG_FILE_PROPS.request.proxy.url),

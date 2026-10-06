@@ -150,7 +150,7 @@ export default class PostParser extends Parser {
           }
         }
         if (images.length > 0) {
-          this.log('warn', `${images.length} images obtained from relationships of post #${id} not listed in 'image_order' metadata - appending at the end`);
+          this.log('debug', `${images.length} images obtained from relationships of post #${id} not listed in 'image_order' metadata - appending at the end`);
           orderedImages.push(...images);
         }
         images = orderedImages.map((img, index) => ({ ...img, index }));

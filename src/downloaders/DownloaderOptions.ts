@@ -2,6 +2,7 @@ import path from 'path';
 import type Logger from '../utils/logging/Logger.js';
 import { type DeepRequired, pickDefined } from '../utils/Misc.js';
 import type DateTime from '../utils/DateTime.js';
+import { compilePostTitleRegex } from './PostTitleRegex.js';
 
 const DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0';
 
@@ -21,9 +22,13 @@ export type StopOnCondition =
   | 'postPublishDateOutOfRange';
 
 export interface DownloaderIncludeOptions {
+  postsSortOrder?: 'newest' | 'oldest' | 'popular' | 'collection';
   lockedContent?: boolean;
   postsWithMediaType?: Array<'image' | 'video' | 'audio' | 'attachment' | 'podcast'> | 'any' | 'none';
   postsInTier?: Array<string> | 'any';
+  postsTitleRegex?: string;
+  postsExcludedCollectionIds?: string[];
+  postsExcludedTags?: string[];
   postsPublished?: {
     after?: DateTime | null;
     before?: DateTime | null;
@@ -76,6 +81,7 @@ export interface DownloaderOptions {
   request?: {
     maxRetries?: number;
     maxConcurrent?: number;
+    maxConcurrentPosts?: number;
     minTime?: number;
     proxy?: ProxyOptions | null;
     userAgent?: string;
@@ -124,9 +130,13 @@ const DEFAULT_DOWNLOADER_INIT: DownloaderInit = {
     media: '{media.filename}'
   },
   include: {
+    postsSortOrder: 'newest',
     lockedContent: true,
     postsWithMediaType: 'any',
     postsInTier: 'any',
+    postsTitleRegex: '',
+    postsExcludedCollectionIds: [],
+    postsExcludedTags: [],
     postsPublished: {
       after: null,
       before: null
@@ -152,6 +162,7 @@ const DEFAULT_DOWNLOADER_INIT: DownloaderInit = {
   request: {
     maxRetries: 3,
     maxConcurrent: 10,
+    maxConcurrentPosts: 1,
     minTime: 333,
     proxy: {
       url: '',
@@ -171,6 +182,21 @@ const DEFAULT_DOWNLOADER_INIT: DownloaderInit = {
 
 export function getDownloaderInit(options?: DownloaderOptions): DownloaderInit {
   const defaults = DEFAULT_DOWNLOADER_INIT;
+  const maxConcurrentPosts = pickDefined(options?.request?.maxConcurrentPosts, defaults.request.maxConcurrentPosts);
+  if (!Number.isSafeInteger(maxConcurrentPosts) || maxConcurrentPosts < 1) {
+    throw Error('maxConcurrentPosts must be a positive integer');
+  }
+  const postsTitleRegex = pickDefined(options?.include?.postsTitleRegex, defaults.include.postsTitleRegex);
+  const postsExcludedCollectionIds = pickDefined(options?.include?.postsExcludedCollectionIds, defaults.include.postsExcludedCollectionIds);
+  const postsExcludedTags = pickDefined(options?.include?.postsExcludedTags, defaults.include.postsExcludedTags);
+  if (postsTitleRegex) {
+    try {
+      compilePostTitleRegex(postsTitleRegex);
+    }
+    catch (error) {
+      throw new Error(`include.postsTitleRegex is not a valid regular expression: ${error instanceof Error ? error.message : error}`);
+    }
+  }
 
   let proxy: DownloaderInit['request']['proxy'] = null;
   if (options?.request?.proxy && defaults.request.proxy) {
@@ -199,9 +225,13 @@ export function getDownloaderInit(options?: DownloaderOptions): DownloaderInit {
       media: options?.filenameFormat?.media || defaults.filenameFormat.media
     },
     include: {
+      postsSortOrder: pickDefined(options?.include?.postsSortOrder, defaults.include.postsSortOrder),
       lockedContent: pickDefined(options?.include?.lockedContent, defaults.include.lockedContent),
       postsWithMediaType: pickDefined(options?.include?.postsWithMediaType, defaults.include.postsWithMediaType),
       postsInTier: pickDefined(options?.include?.postsInTier, defaults.include.postsInTier),
+      postsTitleRegex,
+      postsExcludedCollectionIds,
+      postsExcludedTags,
       postsPublished: {
         after: pickDefined(options?.include?.postsPublished?.after, defaults.include.postsPublished.after),
         before: pickDefined(options?.include?.postsPublished?.before, defaults.include.postsPublished.before)
@@ -227,6 +257,7 @@ export function getDownloaderInit(options?: DownloaderOptions): DownloaderInit {
     request: {
       maxRetries: pickDefined(options?.request?.maxRetries, defaults.request.maxRetries),
       maxConcurrent: pickDefined(options?.request?.maxConcurrent, defaults.request.maxConcurrent),
+      maxConcurrentPosts,
       minTime: pickDefined(options?.request?.minTime, defaults.request.minTime),
       proxy,
       userAgent: pickDefined(options?.request?.userAgent, defaults.request.userAgent)
